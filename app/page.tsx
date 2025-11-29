@@ -18,7 +18,7 @@ export default function HomePage() {
           </div>
           <div className="flex items-center space-x-4">
             <a href="/login" className="text-sm font-medium text-gray-700 hover:text-indigo-600 transition-colors">Sign in</a>
-            <a href="/dashboard" className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 transition-all">
+            <a href="/signup" className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 transition-all">
               Start free trial
               <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -46,7 +46,7 @@ export default function HomePage() {
               Applihero uses a personalized RAG model on your resume and background to coach you through every step of the job application process, from cover letters to interview prep.
             </p>
             <div className="flex flex-wrap gap-4">
-              <a href="/dashboard" className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-700 transition-all">
+              <a href="/signup" className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-700 transition-all">
                 Get started
                 <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -118,9 +118,9 @@ export default function HomePage() {
 
               {/* Generate Button */}
               <div className="mt-6">
-                <button className="w-full inline-flex items-center justify-center rounded-xl bg-gray-900 px-6 py-4 text-sm font-semibold text-white shadow-lg hover:bg-gray-800 transition-all">
+                <a href="/login"><button className="w-full inline-flex items-center justify-center rounded-xl bg-gray-900 px-6 py-4 text-sm font-semibold text-white shadow-lg hover:bg-gray-800 transition-all">
                   Generate More Insights
-                </button>
+                </button></a>
               </div>
             </div>
           </div>

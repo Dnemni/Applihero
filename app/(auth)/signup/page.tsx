@@ -1,4 +1,4 @@
-export default function LoginPage() {
+export default function SignupPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
       {/* Top Navigation */}
@@ -31,15 +31,23 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900">
-            Welcome back
+            Create your account
           </h1>
           <p className="mt-3 text-lg text-gray-600">
-            Sign in to continue your job search journey
+            Start your job search journey with Applihero
           </p>
         </div>
 
         <div className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl p-8 border border-gray-100">
           <form className="space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Full name</label>
+              <input
+                type="text"
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                placeholder="John Doe"
+              />
+            </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">Email address</label>
               <input
@@ -56,26 +64,36 @@ export default function LoginPage() {
                 placeholder="••••••••"
               />
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center">
-                <input type="checkbox" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                <span className="ml-2 text-gray-600">Remember me</span>
-              </label>
-              <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Forgot password?</a>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Confirm password</label>
+              <input
+                type="password"
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                placeholder="••••••••"
+              />
+            </div>
+            <div className="flex items-start text-sm">
+              <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+              <span className="ml-2 text-gray-600">
+                I agree to the{' '}
+                <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Terms of Service</a>
+                {' '}and{' '}
+                <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Privacy Policy</a>
+              </span>
             </div>
             <button
               type="submit"
               className="w-full rounded-lg bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700 shadow-sm transition-all"
             >
-              Sign in
+              Create account
             </button>
           </form>
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <a href="/signup" className="font-semibold text-indigo-600 hover:text-indigo-700">
-                Sign up
+              Already have an account?{' '}
+              <a href="/login" className="font-semibold text-indigo-600 hover:text-indigo-700">
+                Sign in
               </a>
             </p>
           </div>

@@ -1,4 +1,38 @@
+"use client";
+
+import { useState, useRef } from "react";
+
 export default function ProfilePage() {
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type === "application/pdf") {
+      setUploadedFile(file);
+    } else {
+      alert("Please upload a PDF file");
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type === "application/pdf") {
+      setUploadedFile(file);
+    } else {
+      alert("Please upload a PDF file");
+    }
+  };
+
+  const handleClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
       {/* Top Navigation */}
@@ -111,16 +145,54 @@ export default function ProfilePage() {
             Upload your resume so AppliHero can provide personalized coaching based on your experience.
           </p>
           
-          <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer">
-            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            <p className="mt-2 text-sm font-medium text-gray-900">
-              Click to upload or drag and drop
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              PDF, DOC, DOCX up to 10MB
-            </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          
+          <div 
+            onClick={handleClick}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer"
+          >
+            {uploadedFile ? (
+              <>
+                <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="mt-2 text-sm font-medium text-gray-900">
+                  {uploadedFile.name}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+                </p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setUploadedFile(null);
+                  }}
+                  className="mt-3 text-xs text-red-600 hover:text-red-700 font-medium"
+                >
+                  Remove file
+                </button>
+              </>
+            ) : (
+              <>
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p className="mt-2 text-sm font-medium text-gray-900">
+                  Click to upload or drag and drop
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  PDF up to 10MB
+                </p>
+              </>
+            )}
           </div>
         </div>
 

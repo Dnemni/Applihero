@@ -1,10 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { QuestionService } from "@/lib/supabase/services/question.service";
+import type { QuestionStatus } from "@/lib/supabase/types";
 
 export type AnswerEditorPanelProps = {
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  jobId?: string;
+  questions?: Array<{
+    id: string;
+    question_text: string;
+    answer_text: string | null;
+    status: QuestionStatus;
+    order_index: number | null;
+  }>;
+  onQuestionsChange?: () => void;
 };
 
 type Question = {
@@ -32,15 +43,62 @@ const statusStyles = {
   "Final": "bg-green-100 text-green-800"
 };
 
-export function AnswerEditorPanel({ fullscreen = false, onToggleFullscreen }: AnswerEditorPanelProps) {
-  const [questions, setQuestions] = useState<Question[]>(mockQuestions);
-  const [selected, setSelected] = useState<Question | null>(mockQuestions[0]);
+export function AnswerEditorPanel({ 
+  fullscreen = false, 
+  onToggleFullscreen,
+  jobId,
+  questions: dbQuestions,
+  onQuestionsChange 
+}: AnswerEditorPanelProps) {
+  // Convert database questions to local format
+  const localQuestions: Question[] = dbQuestions?.map(q => ({
+    id: q.id,
+    text: q.question_text,
+    status: (q.status.charAt(0).toUpperCase() + q.status.slice(1).replace('_', ' ')) as Question["status"]
+  })) || mockQuestions;
+
+  const [questions, setQuestions] = useState<Question[]>(localQuestions);
+  const [selected, setSelected] = useState<Question | null>(localQuestions[0] || null);
   const [answer, setAnswer] = useState("");
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const questionsEndRef = useRef<HTMLDivElement>(null);
   const questionsContainerRef = useRef<HTMLDivElement>(null);
+
+  // Update local state when dbQuestions changes
+  useEffect(() => {
+    if (dbQuestions) {
+      const updated = dbQuestions.map(q => ({
+        id: q.id,
+        text: q.question_text,
+        status: (q.status.charAt(0).toUpperCase() + q.status.slice(1).replace('_', ' ')) as Question["status"]
+      }));
+      setQuestions(updated);
+      
+      // Update selected question if it exists in the new list
+      if (selected) {
+        const updatedSelected = updated.find(q => q.id === selected.id);
+        if (updatedSelected) {
+          setSelected(updatedSelected);
+          const dbQuestion = dbQuestions.find(q => q.id === selected.id);
+          setAnswer(dbQuestion?.answer_text || "");
+        }
+      } else if (updated.length > 0) {
+        setSelected(updated[0]);
+        setAnswer(dbQuestions[0]?.answer_text || "");
+      }
+    }
+  }, [dbQuestions]);
+
+  // Load answer when selected question changes
+  useEffect(() => {
+    if (selected && dbQuestions) {
+      const dbQuestion = dbQuestions.find(q => q.id === selected.id);
+      setAnswer(dbQuestion?.answer_text || "");
+    }
+  }, [selected?.id]);
 
   const scrollToBottom = () => {
     if (questionsContainerRef.current) {
@@ -48,17 +106,45 @@ export function AnswerEditorPanel({ fullscreen = false, onToggleFullscreen }: An
     }
   };
 
-  const handleAddQuestion = () => {
-    const newQuestion: Question = {
-      id: Date.now().toString(),
-      text: "New question - click to edit",
-      status: "Not started"
-    };
-    setQuestions([...questions, newQuestion]);
-    setSelected(newQuestion);
-    setEditingQuestionId(newQuestion.id);
-    setEditingText(newQuestion.text);
-    setTimeout(scrollToBottom, 0);
+  const handleAddQuestion = async () => {
+    if (!jobId) {
+      // Fallback to local state if no jobId
+      const newQuestion: Question = {
+        id: Date.now().toString(),
+        text: "",
+        status: "Not started"
+      };
+      setQuestions([...questions, newQuestion]);
+      setSelected(newQuestion);
+      setEditingQuestionId(newQuestion.id);
+      setEditingText(newQuestion.text);
+      setTimeout(scrollToBottom, 0);
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const nextOrder = questions.length;
+      const newQuestion = await QuestionService.createQuestion(jobId, "", nextOrder);
+      
+      if (newQuestion) {
+        // Add to local state without reloading entire job
+        const localQuestion: Question = {
+          id: newQuestion.id,
+          text: newQuestion.question_text,
+          status: newQuestion.status as Question["status"]
+        };
+        setQuestions([...questions, localQuestion]);
+        setSelected(localQuestion);
+        setEditingQuestionId(localQuestion.id);
+        setEditingText(localQuestion.text);
+        setTimeout(scrollToBottom, 0);
+      }
+    } catch (error) {
+      console.error("Failed to add question:", error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleStartEdit = (question: Question) => {
@@ -66,28 +152,118 @@ export function AnswerEditorPanel({ fullscreen = false, onToggleFullscreen }: An
     setEditingText(question.text);
   };
 
-  const handleSaveEdit = (questionId: string) => {
-    setQuestions(questions.map(q => 
-      q.id === questionId ? { ...q, text: editingText } : q
-    ));
-    setEditingQuestionId(null);
-    if (selected?.id === questionId) {
-      setSelected({ ...selected, text: editingText });
+  const handleSaveEdit = async (questionId: string) => {
+    if (!jobId) {
+      // Fallback to local state
+      setQuestions(questions.map(q => 
+        q.id === questionId ? { ...q, text: editingText } : q
+      ));
+      setEditingQuestionId(null);
+      if (selected?.id === questionId) {
+        setSelected({ ...selected, text: editingText });
+      }
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await QuestionService.updateQuestion(questionId, { question_text: editingText });
+      
+      // Update local state without reloading
+      setQuestions(questions.map(q => 
+        q.id === questionId ? { ...q, text: editingText } : q
+      ));
+      setEditingQuestionId(null);
+      if (selected?.id === questionId) {
+        setSelected({ ...selected, text: editingText });
+      }
+    } catch (error) {
+      console.error("Failed to update question:", error);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = async (questionId: string) => {
+    // If the text is empty or unchanged placeholder, delete the question
+    if (!editingText.trim() || editingText === "New question - click to edit") {
+      await handleDeleteQuestion(questionId);
+    }
     setEditingQuestionId(null);
     setEditingText("");
   };
 
-  const handleDeleteQuestion = (questionId: string) => {
-    const updatedQuestions = questions.filter(q => q.id !== questionId);
-    setQuestions(updatedQuestions);
-    setDeletingQuestionId(null);
-    
-    if (selected?.id === questionId) {
-      setSelected(updatedQuestions.length > 0 ? updatedQuestions[0] : null);
+  const handleSaveDraft = async () => {
+    if (!selected || !jobId) return;
+
+    try {
+      setSaving(true);
+      await QuestionService.saveAnswer(selected.id, answer, "Draft");
+      
+      // Update local state without reloading
+      setQuestions(questions.map(q => 
+        q.id === selected.id ? { ...q, status: "Draft" } : q
+      ));
+      if (selected) {
+        setSelected({ ...selected, status: "Draft" });
+      }
+    } catch (error) {
+      console.error("Failed to save draft:", error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRequestFeedback = async () => {
+    if (!selected || !jobId) return;
+
+    try {
+      setSaving(true);
+      await QuestionService.saveAnswer(selected.id, answer, "Final");
+      
+      // Update local state without reloading
+      setQuestions(questions.map(q => 
+        q.id === selected.id ? { ...q, status: "Final" } : q
+      ));
+      if (selected) {
+        setSelected({ ...selected, status: "Final" });
+      }
+    } catch (error) {
+      console.error("Failed to request feedback:", error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteQuestion = async (questionId: string) => {
+    if (!jobId) {
+      // Fallback to local state
+      const updatedQuestions = questions.filter(q => q.id !== questionId);
+      setQuestions(updatedQuestions);
+      setDeletingQuestionId(null);
+      
+      if (selected?.id === questionId) {
+        setSelected(updatedQuestions.length > 0 ? updatedQuestions[0] : null);
+      }
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await QuestionService.deleteQuestion(questionId);
+      
+      // Update local state without reloading
+      const updatedQuestions = questions.filter(q => q.id !== questionId);
+      setQuestions(updatedQuestions);
+      setDeletingQuestionId(null);
+      
+      if (selected?.id === questionId) {
+        setSelected(updatedQuestions.length > 0 ? updatedQuestions[0] : null);
+      }
+    } catch (error) {
+      console.error("Failed to delete question:", error);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -154,13 +330,14 @@ export function AnswerEditorPanel({ fullscreen = false, onToggleFullscreen }: An
                     <textarea
                       value={editingText}
                       onChange={(e) => setEditingText(e.target.value)}
-                      className="w-full rounded-lg border border-purple-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200/40 resize-none"
+                      placeholder="Enter your question here..."
+                      className="w-full rounded-lg border border-purple-300 bg-white px-2 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 placeholder:italic focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200/40 resize-none"
                       rows={3}
                       autoFocus
                     />
                     <div className="flex gap-1.5 justify-end">
                       <button
-                        onClick={handleCancelEdit}
+                        onClick={() => handleCancelEdit(q.id)}
                         className="px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-800 transition-colors"
                       >
                         Cancel
@@ -201,7 +378,9 @@ export function AnswerEditorPanel({ fullscreen = false, onToggleFullscreen }: An
                       onClick={() => setSelected(q)}
                       className="cursor-pointer"
                     >
-                      <div className="line-clamp-2 text-sm font-medium leading-snug pr-6">{q.text}</div>
+                      <div className={`line-clamp-2 text-sm font-medium leading-snug pr-6 ${
+                        q.text === "New question - click to edit" ? "text-gray-400 italic" : ""
+                      }`}>{q.text}</div>
                       <div className="mt-2.5 flex items-center justify-between">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[q.status]}`}>
                           {q.status}
@@ -272,17 +451,25 @@ export function AnswerEditorPanel({ fullscreen = false, onToggleFullscreen }: An
                   <span>{answer.length} characters</span>
                 </div>
                 <div className="flex gap-2">
-                  <button className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm">
+                  <button 
+                    onClick={handleSaveDraft}
+                    disabled={saving || !jobId}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                     </svg>
-                    Save draft
+                    {saving ? "Saving..." : "Save draft"}
                   </button>
-                  <button className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-500 to-pink-400 px-4 py-2 text-sm font-semibold text-white hover:from-purple-600 hover:to-pink-500 transition-colors shadow-md">
+                  <button 
+                    onClick={handleRequestFeedback}
+                    disabled={saving || !jobId}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-500 to-pink-400 px-4 py-2 text-sm font-semibold text-white hover:from-purple-600 hover:to-pink-500 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                     </svg>
-                    Request feedback
+                    {saving ? "Saving..." : "Request feedback"}
                   </button>
                 </div>
               </div>

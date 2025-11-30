@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { ChatService } from "@/lib/supabase/services/chat.service";
 
 export type ChatPanelProps = {
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  jobId?: string;
 };
 
 type Message = { role: "user" | "assistant"; content: string };
@@ -17,9 +19,11 @@ const initialMessages: Message[] = [
   }
 ];
 
-export function ChatPanel({ fullscreen = false, onToggleFullscreen }: ChatPanelProps) {
+export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -30,12 +34,76 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen }: ChatPanelP
     scrollToBottom();
   }, [messages]);
 
-  function handleSend(e: React.FormEvent) {
+  // Load chat history when jobId is provided
+  useEffect(() => {
+    async function loadMessages() {
+      if (!jobId) return;
+      
+      setLoading(true);
+      try {
+        const history = await ChatService.getChatHistory(jobId);
+        if (history.length > 0) {
+          setMessages(history.map((msg: any) => ({
+            role: msg.role as "user" | "assistant",
+            content: msg.content
+          })));
+        }
+      } catch (error) {
+        console.error("Failed to load chat history:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadMessages();
+  }, [jobId]);
+
+  async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim()) return;
-    setMessages((prev) => [...prev, { role: "user", content: input }]);
+    if (!input.trim() || isTyping) return;
+    
+    const userMessage = input.trim();
     setInput("");
-    // TODO: call /api/jobsessions/:id/chat and append assistant reply
+    
+    // Optimistically add user message
+    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+
+    // Save to database if jobId is provided
+    if (jobId) {
+      try {
+        await ChatService.addMessage(jobId, "user", userMessage);
+      } catch (error) {
+        console.error("Failed to save user message:", error);
+      }
+    }
+
+    // Show typing indicator
+    setIsTyping(true);
+
+    // Simulate AI response after a delay
+    setTimeout(async () => {
+      const responses = [
+        "That's a great question! Let me help you craft a compelling answer that highlights your strengths.",
+        "I can help you with that. Consider framing your experience in a way that directly addresses what they're looking for.",
+        "Good thinking! Let's work on positioning your skills and experience to stand out in your application.",
+        "Excellent! I'd recommend focusing on specific examples that demonstrate your impact and capabilities.",
+        "Let me guide you through this. The key is to connect your background with the role's requirements."
+      ];
+      
+      const assistantMessage = responses[Math.floor(Math.random() * responses.length)];
+      
+      setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage }]);
+      setIsTyping(false);
+
+      // Save assistant message to database
+      if (jobId) {
+        try {
+          await ChatService.addMessage(jobId, "assistant", assistantMessage);
+        } catch (error) {
+          console.error("Failed to save assistant message:", error);
+        }
+      }
+    }, 2000); // 2 second delay for typing animation
   }
 
   return (
@@ -98,6 +166,22 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen }: ChatPanelP
             </div>
           </div>
         ))}
+        {isTyping && (
+          <div className="flex gap-2.5 items-end flex-row">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200">
+              <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            </div>
+            <div className="rounded-2xl bg-gray-100 px-4 py-2.5 max-w-[70%]">
+              <div className="flex gap-1">
+                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }}></span>
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <form
@@ -113,8 +197,8 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen }: ChatPanelP
           />
           <button
             type="submit"
-            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-400 px-5 py-3 text-sm font-semibold text-white shadow-md hover:from-indigo-600 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 transition-all active:scale-[0.98] disabled:opacity-50"
-            disabled={!input.trim()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-400 px-5 py-3 text-sm font-semibold text-white shadow-md hover:from-indigo-600 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!input.trim() || isTyping}
           >
             <span>Send</span>
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

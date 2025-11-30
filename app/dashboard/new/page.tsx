@@ -1,4 +1,85 @@
+"use client";
+
+import { useState, useEffect, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
+import { JobService } from "@/lib/supabase/services";
+
 export default function NewJobPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [redirecting, setRedirecting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [jobTitle, setJobTitle] = useState("");
+  const [company, setCompany] = useState("");
+  const [description, setDescription] = useState("");
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  async function checkAuth() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setRedirecting(true);
+      setTimeout(() => router.push("/login"), 1500);
+      return;
+    }
+    setLoading(false);
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    
+    if (!jobTitle.trim() || !company.trim()) {
+      alert("Please fill in job title and company");
+      return;
+    }
+
+    setSubmitting(true);
+
+    const newJob = await JobService.createJob(
+      jobTitle,
+      company,
+      description || undefined
+    );
+
+    if (newJob) {
+      router.push(`/jobs/${newJob.id}`);
+    } else {
+      alert("Failed to create job application");
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
+
+  if (redirecting) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-lg font-medium text-gray-900 mb-2">Not authenticated</p>
+          <p className="text-sm text-gray-600">Redirecting to login...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
       {/* Top Navigation */}
@@ -23,15 +104,15 @@ export default function NewJobPage() {
               </svg>
               Profile
             </a>
-            <a
-              href="/login"
+            <button
+              onClick={handleSignOut}
               className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-all"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
               Sign Out
-            </a>
+            </button>
           </div>
         </div>
       </div>
@@ -39,41 +120,63 @@ export default function NewJobPage() {
       <div className="max-w-7xl mx-auto px-8 py-12">
       <div className="w-full max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">New application</h1>
-        <p className="text-sm text-slate-400">
+        <h1 className="text-2xl font-semibold text-gray-900">New application</h1>
+        <p className="text-sm text-gray-600">
           Paste the job details so AppliHero can coach you.
         </p>
       </div>
 
-      <form className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="text-sm text-slate-300">Job title</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Job title *</label>
           <input
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none ring-indigo-500/70 focus:ring-2"
+            type="text"
+            value={jobTitle}
+            onChange={(e) => setJobTitle(e.target.value)}
+            required
+            disabled={submitting}
+            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="Applied Scientist Intern"
           />
         </div>
         <div>
-          <label className="text-sm text-slate-300">Company</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Company *</label>
           <input
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none ring-indigo-500/70 focus:ring-2"
+            type="text"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            required
+            disabled={submitting}
+            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="OpenAI"
           />
         </div>
         <div>
-          <label className="text-sm text-slate-300">Job description</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Job description (optional)</label>
           <textarea
             rows={8}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none ring-indigo-500/70 focus:ring-2"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={submitting}
+            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="Paste the full job description here..."
           />
         </div>
-        <button
-          type="submit"
-          className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400"
-        >
-          Create job session
-        </button>
+        <div className="flex gap-3">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {submitting ? "Creating..." : "Create job session"}
+          </button>
+          <a
+            href="/dashboard"
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </a>
+        </div>
       </form>
     </div>
       </div>

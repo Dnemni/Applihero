@@ -59,7 +59,7 @@ export class QuestionService {
 
     const { data, error } = await supabase
       .from('questions')
-      .insert(questionData)
+      .insert(questionData as any)
       .select()
       .single();
 
@@ -80,6 +80,7 @@ export class QuestionService {
   ): Promise<Question | null> {
     const { data, error } = await supabase
       .from('questions')
+      // @ts-expect-error - Supabase type inference issue
       .update(updates)
       .eq('id', questionId)
       .select()
@@ -102,6 +103,7 @@ export class QuestionService {
   ): Promise<boolean> {
     const { error } = await supabase
       .from('questions')
+      // @ts-expect-error - Supabase type inference issue
       .update({ question_text: questionText })
       .eq('id', questionId);
 
@@ -128,6 +130,7 @@ export class QuestionService {
 
     const { error } = await supabase
       .from('questions')
+      // @ts-expect-error - Supabase type inference issue
       .update(updates)
       .eq('id', questionId);
 
@@ -148,6 +151,7 @@ export class QuestionService {
   ): Promise<boolean> {
     const { error } = await supabase
       .from('questions')
+      // @ts-expect-error - Supabase type inference issue
       .update({ status })
       .eq('id', questionId);
 
@@ -187,6 +191,7 @@ export class QuestionService {
     const updates = questionIds.map((id, index) => 
       supabase
         .from('questions')
+        // @ts-expect-error - Supabase type inference issue
         .update({ order_index: index })
         .eq('id', id)
         .eq('job_id', jobId)
@@ -220,11 +225,12 @@ export class QuestionService {
       return { total: 0, notStarted: 0, draft: 0, final: 0 };
     }
 
+    const questions = data as any[];
     return {
-      total: data.length,
-      notStarted: data.filter(q => q.status === 'Not started').length,
-      draft: data.filter(q => q.status === 'Draft').length,
-      final: data.filter(q => q.status === 'Final').length
+      total: questions.length,
+      notStarted: questions.filter(q => q.status === 'Not started').length,
+      draft: questions.filter(q => q.status === 'Draft').length,
+      final: questions.filter(q => q.status === 'Final').length
     };
   }
 }

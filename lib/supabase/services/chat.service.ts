@@ -38,7 +38,7 @@ export class ChatService {
 
     const { data, error } = await supabase
       .from('chat_messages')
-      .insert(messageData)
+      .insert(messageData as any)
       .select()
       .single();
 

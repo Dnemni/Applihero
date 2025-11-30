@@ -85,14 +85,10 @@ export class ProfileService {
       return null;
     }
 
-    const { data } = supabase.storage
-      .from('resumes')
-      .getPublicUrl(fileName);
+    // Store the file path in the database (not the URL)
+    await this.updateProfile({ resume_url: fileName });
 
-    // Update profile with resume URL
-    await this.updateProfile({ resume_url: data.publicUrl });
-
-    return data.publicUrl;
+    return fileName;
   }
 
   /**
@@ -114,14 +110,10 @@ export class ProfileService {
       return null;
     }
 
-    const { data } = supabase.storage
-      .from('transcripts')
-      .getPublicUrl(fileName);
+    // Store the file path in the database (not the URL)
+    await this.updateProfile({ transcript_url: fileName });
 
-    // Update profile with transcript URL
-    await this.updateProfile({ transcript_url: data.publicUrl });
-
-    return data.publicUrl;
+    return fileName;
   }
 
   /**
@@ -148,6 +140,62 @@ export class ProfileService {
     }
 
     return true;
+  }
+
+  /**
+   * Get a signed URL for viewing a resume
+   */
+  static async getResumeUrl(filePath: string): Promise<string | null> {
+    if (!filePath) return null;
+
+    // If it's already a full URL, return it
+    if (filePath.startsWith('http')) {
+      return filePath;
+    }
+
+    // Generate a signed URL that expires in 1 hour
+    const { data, error } = await supabase.storage
+      .from('resumes')
+      .createSignedUrl(filePath, 3600);
+
+    if (error) {
+      console.error('Error creating signed URL for resume:', error);
+      // Fallback to public URL
+      const { data: publicData } = supabase.storage
+        .from('resumes')
+        .getPublicUrl(filePath);
+      return publicData.publicUrl;
+    }
+
+    return data.signedUrl;
+  }
+
+  /**
+   * Get a signed URL for viewing a transcript
+   */
+  static async getTranscriptUrl(filePath: string): Promise<string | null> {
+    if (!filePath) return null;
+
+    // If it's already a full URL, return it
+    if (filePath.startsWith('http')) {
+      return filePath;
+    }
+
+    // Generate a signed URL that expires in 1 hour
+    const { data, error } = await supabase.storage
+      .from('transcripts')
+      .createSignedUrl(filePath, 3600);
+
+    if (error) {
+      console.error('Error creating signed URL for transcript:', error);
+      // Fallback to public URL
+      const { data: publicData } = supabase.storage
+        .from('transcripts')
+        .getPublicUrl(filePath);
+      return publicData.publicUrl;
+    }
+
+    return data.signedUrl;
   }
 
   /**

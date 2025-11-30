@@ -61,66 +61,17 @@ CREATE TRIGGER on_auth_user_created
 ```
 - [ ] Run it
 
-### 5. Set Up Storage Buckets
-- [ ] In Supabase dashboard, go to Storage
-- [ ] Click "New bucket"
-- [ ] Name: `resumes`, Make it private, Click "Create bucket"
-- [ ] Click "New bucket"
-- [ ] Name: `transcripts`, Make it private, Click "Create bucket"
-- [ ] Click "New bucket"
-- [ ] Name: `job-documents`, Make it private, Click "Create bucket"
+### 5. Set Up Storage Buckets and Policies
+- [ ] In Supabase dashboard, go to SQL Editor
+- [ ] Click "New Query"
+- [ ] Open `lib/supabase/setup-storage.sql` in your code editor
+- [ ] Copy the entire contents
+- [ ] Paste into Supabase SQL Editor
+- [ ] Click "Run"
+- [ ] Verify no errors appear
+- [ ] Go to Storage tab and confirm you see `resumes` and `transcripts` buckets
 
-### 6. Set Up Storage Policies
-
-For each bucket (resumes, transcripts, job-documents), add these policies:
-
-- [ ] Click on the bucket name
-- [ ] Go to "Policies" tab
-- [ ] Click "New Policy"
-- [ ] Click "Create a policy from scratch"
-
-**Upload Policy:**
-```sql
-CREATE POLICY "Users can upload own files"
-ON storage.objects FOR INSERT
-WITH CHECK (
-  bucket_id = 'resumes' AND 
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-```
-
-**Update Policy:**
-```sql
-CREATE POLICY "Users can update own files"
-ON storage.objects FOR UPDATE
-USING (
-  bucket_id = 'resumes' AND 
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-```
-
-**Select Policy:**
-```sql
-CREATE POLICY "Users can read own files"
-ON storage.objects FOR SELECT
-USING (
-  bucket_id = 'resumes' AND 
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-```
-
-**Delete Policy:**
-```sql
-CREATE POLICY "Users can delete own files"
-ON storage.objects FOR DELETE
-USING (
-  bucket_id = 'resumes' AND 
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-```
-
-- [ ] Repeat for `transcripts` bucket (change bucket_id to 'transcripts')
-- [ ] Repeat for `job-documents` bucket (change bucket_id to 'job-documents')
+**Note:** The script creates public buckets for resumes and transcripts. If you need to add the job-documents bucket later, create it manually in the Storage tab.
 
 ### 7. Configure Authentication
 - [ ] In Supabase dashboard, go to Authentication > Providers

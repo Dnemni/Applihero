@@ -253,13 +253,9 @@ export class JobService {
       .from('referrals')
       .select('*')
       .eq('job_id', jobId)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      if (error.code === 'PGRST116') {
-        // No referral found
-        return null;
-      }
       console.error('Error fetching referral:', error);
       return null;
     }
@@ -268,11 +264,14 @@ export class JobService {
   }
 
   /**
-   * Update or create a referral for a job
+   * Update referral for a job
    */
   static async updateReferral(
     jobId: string,
     referralData: {
+      person_name?: string | null;
+      company?: string | null;
+      title?: string | null;
       linkedin_url?: string | null;
       relation?: string | null;
     }
@@ -298,16 +297,28 @@ export class JobService {
       .from('referrals')
       .select('id')
       .eq('job_id', jobId)
-      .single();
+      .maybeSingle();
 
     if (existingReferral) {
       // Update existing referral
+      const updateData: any = {
+        linkedin_url: referralData.linkedin_url || null,
+        relation: referralData.relation || null,
+      };
+      // Include person_name if provided
+      if (referralData.person_name) {
+        updateData.person_name = referralData.person_name;
+      }
+      if (referralData.company !== undefined) {
+        updateData.company = referralData.company || null;
+      }
+      if (referralData.title !== undefined) {
+        updateData.title = referralData.title || null;
+      }
+
       const { error } = await supabase
         .from('referrals')
-        .update({
-          linkedin_url: referralData.linkedin_url || null,
-          relation: referralData.relation || null,
-        })
+        .update(updateData)
         .eq('job_id', jobId);
 
       if (error) {

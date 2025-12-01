@@ -7,6 +7,7 @@ import type { JobWithQuestions } from "@/lib/supabase/types";
 import { ChatPanel } from "../../../components/chat";
 import { AnswerEditorPanel } from "../../../components/answer-editor";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
+import { CoverLetterModal } from "@/components/cover-letter-modal";
 import type { OnboardingStep } from "@/components/onboarding-overlay";
 import { 
   getOnboardingState, 
@@ -24,6 +25,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState<string>("");
   const [showReferralModal, setShowReferralModal] = useState(false);
+  const [showCoverLetterModal, setShowCoverLetterModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackScore, setFeedbackScore] = useState<number | null>(null);
@@ -224,6 +226,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
     setUpdatingReferral(true);
     try {
       const success = await JobService.updateReferral(job.id, {
+        person_name: referralForm.person_name || null,
+        company: referralForm.company || null,
+        title: referralForm.title || null,
         linkedin_url: referralForm.linkedin_url || null,
         relation: referralForm.relation || null,
       });
@@ -233,6 +238,13 @@ export default function JobPage({ params }: { params: { id: string } }) {
         const updatedReferral = await JobService.getReferral(job.id);
         if (updatedReferral) {
           setReferral(updatedReferral);
+          setReferralForm({
+            person_name: updatedReferral.person_name || "",
+            company: updatedReferral.company || "",
+            title: updatedReferral.title || "",
+            linkedin_url: updatedReferral.linkedin_url || "",
+            relation: updatedReferral.relation || "",
+          });
           setShowReferralModal(false);
           alert("Referral updated successfully!");
         } else {
@@ -414,6 +426,15 @@ export default function JobPage({ params }: { params: { id: string } }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
               Referral
+            </button>
+            <button
+              onClick={() => setShowCoverLetterModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all shadow-sm"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Cover Letter
             </button>
             <button
               onClick={handleOpenEdit}
@@ -796,6 +817,17 @@ export default function JobPage({ params }: { params: { id: string } }) {
           showProgress={true}
         />
       )}
+
+      {/* Cover Letter Modal */}
+      <CoverLetterModal
+        isOpen={showCoverLetterModal}
+        onClose={() => setShowCoverLetterModal(false)}
+        jobId={job.id}
+        jobTitle={job.job_title}
+        company={job.company_name}
+        jobDescription={job.job_description || undefined}
+        userId={userId}
+      />
     </div>
   );
 }

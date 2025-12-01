@@ -27,6 +27,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const [userName, setUserName] = useState("");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuthAndLoadJobs();
@@ -72,6 +74,32 @@ export default function DashboardPage() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push("/login");
+  }
+
+  async function handleDeleteJob(jobId: string, jobTitle: string, companyName: string) {
+    if (!confirm(`Are you sure you want to delete the application for ${jobTitle} at ${companyName}? This will delete all related data including chat history and answers.`)) {
+      return;
+    }
+
+    setDeletingId(jobId);
+    try {
+      const response = await fetch(`/api/jobs/${jobId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Remove from UI
+        setJobs(jobs.filter(j => j.id !== jobId));
+        alert("Job deleted successfully");
+      } else {
+        alert("Failed to delete job");
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      alert("Failed to delete job");
+    }
+    setDeletingId(null);
+    setOpenMenuId(null);
   }
 
   if (redirecting) {
@@ -197,14 +225,14 @@ export default function DashboardPage() {
           <div className="grid gap-6 md:grid-cols-2">
             {jobs.map((job) => {
               const statusInfo = getStatusDisplay(job.status);
+              const isDeleting = deletingId === job.id;
               return (
-                <a
+                <div
                   key={job.id}
-                  href={`/jobs/${job.id}`}
                   className="group relative rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-xl p-6 shadow-xl hover:shadow-2xl hover:border-indigo-300 transition-all duration-200"
                 >
                   <div className="flex items-start justify-between">
-                    <div className="flex-1">
+                    <a href={`/jobs/${job.id}`} className="flex-1">
                       <h2 className="text-base font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">{job.title}</h2>
                       <p className="mt-1 flex items-center gap-1.5 text-sm text-gray-600">
                         <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -212,27 +240,71 @@ export default function DashboardPage() {
                         </svg>
                         {job.company}
                       </p>
+                    </a>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${statusInfo.style}`}>
+                        {statusInfo.label}
+                      </span>
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(openMenuId === job.id ? null : job.id);
+                          }}
+                          disabled={isDeleting}
+                          className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                        >
+                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                          </svg>
+                        </button>
+                        {openMenuId === job.id && (
+                          <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                            <a
+                              href={`/jobs/${job.id}`}
+                              className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Edit Job
+                            </a>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteJob(job.id, job.title, job.company);
+                              }}
+                              disabled={isDeleting}
+                              className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              {isDeleting ? "Deleting..." : "Delete Job"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${statusInfo.style}`}>
-                      {statusInfo.label}
-                    </span>
                   </div>
                   
-                  <div className="mt-3 flex items-center gap-3 text-xs text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      {formatLastTouched(job.lastTouched)}
-                    </span>
-                  </div>
+                  <a href={`/jobs/${job.id}`} className="block mt-3">
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {formatLastTouched(job.lastTouched)}
+                      </span>
+                    </div>
+                  </a>
                   
-                  <div className="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <a href={`/jobs/${job.id}`} className="absolute right-4 bottom-4 opacity-0 group-hover:opacity-100 transition-opacity">
                     <svg className="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
-                  </div>
-                </a>
+                  </a>
+                </div>
               );
             })}
           </div>

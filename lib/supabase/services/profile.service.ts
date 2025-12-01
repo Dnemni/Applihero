@@ -53,7 +53,6 @@ export class ProfileService {
 
     const { data, error } = await supabase
       .from('profiles')
-      // @ts-expect-error - Supabase type inference issue
       .update(updates)
       .eq('id', user.id)
       .select()
@@ -68,7 +67,7 @@ export class ProfileService {
   }
 
   /**
-   * Upload resume file to Supabase Storage
+   * Upload resume file to Supabase Storage and extract text
    */
   static async uploadResume(file: File): Promise<string | null> {
     const { data: { user } } = await supabase.auth.getUser();
@@ -89,11 +88,31 @@ export class ProfileService {
     // Store the file path in the database (not the URL)
     await this.updateProfile({ resume_url: fileName });
 
+    // Extract text from PDF
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('userId', user.id);
+      formData.append('fileType', 'resume');
+
+      const response = await fetch('/api/profile/extract-text', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        console.error('Text extraction failed:', await response.text());
+      }
+    } catch (err) {
+      console.error('Error extracting text:', err);
+      // Don't fail the upload if text extraction fails
+    }
+
     return fileName;
   }
 
   /**
-   * Upload transcript file to Supabase Storage
+   * Upload transcript file to Supabase Storage and extract text
    */
   static async uploadTranscript(file: File): Promise<string | null> {
     const { data: { user } } = await supabase.auth.getUser();
@@ -114,6 +133,26 @@ export class ProfileService {
     // Store the file path in the database (not the URL)
     await this.updateProfile({ transcript_url: fileName });
 
+    // Extract text from PDF
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('userId', user.id);
+      formData.append('fileType', 'transcript');
+
+      const response = await fetch('/api/profile/extract-text', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        console.error('Text extraction failed:', await response.text());
+      }
+    } catch (err) {
+      console.error('Error extracting text:', err);
+      // Don't fail the upload if text extraction fails
+    }
+
     return fileName;
   }
 
@@ -129,7 +168,6 @@ export class ProfileService {
 
     const { error } = await supabase
       .from('profiles')
-      // @ts-expect-error - Supabase type inference issue
       .update({
         email_notifications: emailNotifications,
         marketing_emails: marketingEmails
@@ -209,7 +247,6 @@ export class ProfileService {
 
     const { error } = await supabase
       .from('profiles')
-      // @ts-expect-error - Supabase type inference issue
       .update({ active: false })
       .eq('id', user.id);
 

@@ -38,15 +38,45 @@ export default function NewJobPage() {
 
     setSubmitting(true);
 
-    const newJob = await JobService.createJob(
-      jobTitle,
-      company,
-      description || undefined
-    );
+    try {
+      // Create the job
+      const newJob = await JobService.createJob(
+        jobTitle,
+        company,
+        description || undefined
+      );
 
-    if (newJob) {
+      if (!newJob) {
+        alert("Failed to create job application");
+        setSubmitting(false);
+        return;
+      }
+
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        // Ingest documents into RAG system (wait for completion)
+        try {
+          const ingestResponse = await fetch(`/api/jobs/${newJob.id}/ingest`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id }),
+          });
+          
+          if (!ingestResponse.ok) {
+            console.warn("Document ingestion failed, but continuing...");
+          }
+        } catch (err) {
+          console.error("Failed to ingest documents:", err);
+          // Don't block navigation on ingestion failure
+        }
+      }
+
+      // Navigate to the job page
       router.push(`/jobs/${newJob.id}`);
-    } else {
+    } catch (error) {
+      console.error("Error creating job:", error);
       alert("Failed to create job application");
       setSubmitting(false);
     }

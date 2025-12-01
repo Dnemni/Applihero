@@ -25,6 +25,8 @@ export interface Database {
           bio: string | null;
           resume_url: string | null;
           transcript_url: string | null;
+          resume_text: string | null;
+          transcript_text: string | null;
           email_notifications: boolean;
           marketing_emails: boolean;
           active: boolean;
@@ -37,8 +39,10 @@ export interface Database {
           last_name?: string | null;
           email: string;
           bio?: string | null;
-          resume_url?: string | null;
-          transcript_url?: string | null;
+          resume_url: string | null;
+          transcript_url: string | null;
+          resume_text: string | null;
+          transcript_text: string | null;
           email_notifications?: boolean;
           marketing_emails?: boolean;
           active?: boolean;
@@ -53,6 +57,8 @@ export interface Database {
           bio?: string | null;
           resume_url?: string | null;
           transcript_url?: string | null;
+          resume_text?: string | null;
+          transcript_text?: string | null;
           email_notifications?: boolean;
           marketing_emails?: boolean;
           active?: boolean;
@@ -103,6 +109,8 @@ export interface Database {
           answer_text: string | null;
           status: QuestionStatus;
           order_index: number | null;
+          feedback_score: number | null;
+          feedback_notes: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -113,6 +121,8 @@ export interface Database {
           answer_text?: string | null;
           status?: QuestionStatus;
           order_index?: number | null;
+          feedback_score?: number | null;
+          feedback_notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -123,6 +133,8 @@ export interface Database {
           answer_text?: string | null;
           status?: QuestionStatus;
           order_index?: number | null;
+          feedback_score?: number | null;
+          feedback_notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };

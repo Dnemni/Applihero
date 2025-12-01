@@ -145,4 +145,28 @@ export class ChatService {
     const result = await this.addAssistantMessage(jobId, greeting);
     return result !== null;
   }
+
+  /**
+   * Send message to RAG-enabled chat API and get response
+   */
+  static async sendMessage(
+    jobId: string,
+    userId: string,
+    message: string
+  ): Promise<string> {
+    const response = await fetch(`/api/jobsessions/${jobId}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message, userId }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Chat API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.reply;
+  }
 }

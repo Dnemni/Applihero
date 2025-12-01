@@ -15,6 +15,11 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [redirecting, setRedirecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState<string>("");
+  const [showDescriptionModal, setShowDescriptionModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({ jobTitle: "", companyName: "", jobDescription: "" });
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     checkAuthAndLoadJob();
@@ -74,6 +79,73 @@ export default function JobPage({ params }: { params: { id: string } }) {
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push("/login");
+  }
+
+  function handleOpenEdit() {
+    if (!job) return;
+    setEditForm({
+      jobTitle: job.job_title,
+      companyName: job.company_name,
+      jobDescription: job.job_description || "",
+    });
+    setShowEditModal(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!job || !userId) return;
+    
+    setUpdating(true);
+    try {
+      const response = await fetch(`/api/jobs/${job.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobTitle: editForm.jobTitle,
+          companyName: editForm.companyName,
+          jobDescription: editForm.jobDescription,
+          userId,
+        }),
+      });
+
+      if (response.ok) {
+        setShowEditModal(false);
+        await loadJob();
+        alert("Job updated and documents reingested!");
+      } else {
+        alert("Failed to update job");
+      }
+    } catch (err) {
+      console.error('Update error:', err);
+      alert("Failed to update job");
+    }
+    setUpdating(false);
+  }
+
+  async function handleDelete() {
+    if (!job) return;
+    
+    if (!confirm(`Are you sure you want to delete this job application for ${job.company_name}? This will delete all related data including chat history and answers.`)) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const response = await fetch(`/api/jobs/${job.id}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        alert("Job deleted successfully");
+        router.push("/dashboard");
+      } else {
+        alert("Failed to delete job");
+        setDeleting(false);
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      alert("Failed to delete job");
+      setDeleting(false);
+    }
   }
 
   function getStatusStyle(status: string) {
@@ -166,6 +238,34 @@ export default function JobPage({ params }: { params: { id: string } }) {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowDescriptionModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all shadow-sm"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              View Description
+            </button>
+            <button
+              onClick={handleOpenEdit}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all shadow-sm"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Edit
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
             <button 
               onClick={handleSubmitApplication}
               disabled={submitting || job.status === "Submitted"}
@@ -249,6 +349,104 @@ export default function JobPage({ params }: { params: { id: string } }) {
           )}
         </div>
       </div>
+
+      {/* View Description Modal */}
+      {showDescriptionModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDescriptionModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Job Description</h2>
+                <button onClick={() => setShowDescriptionModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-140px)]">
+              {job.job_description ? (
+                <div className="prose prose-sm max-w-none">
+                  <p className="whitespace-pre-wrap text-gray-700">{job.job_description}</p>
+                </div>
+              ) : (
+                <p className="text-gray-500 italic">No job description available</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !updating && setShowEditModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Edit Job Details</h2>
+                <button onClick={() => !updating && setShowEditModal(false)} className="text-gray-400 hover:text-gray-600" disabled={updating}>
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-200px)] space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Job Title *</label>
+                <input
+                  type="text"
+                  value={editForm.jobTitle}
+                  onChange={e => setEditForm({...editForm, jobTitle: e.target.value})}
+                  disabled={updating}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company *</label>
+                <input
+                  type="text"
+                  value={editForm.companyName}
+                  onChange={e => setEditForm({...editForm, companyName: e.target.value})}
+                  disabled={updating}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
+                <textarea
+                  rows={10}
+                  value={editForm.jobDescription}
+                  onChange={e => setEditForm({...editForm, jobDescription: e.target.value})}
+                  disabled={updating}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50"
+                />
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> Updating will delete and reingest all documents for this job, which may take a few seconds.
+                </p>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowEditModal(false)}
+                disabled={updating}
+                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={updating || !editForm.jobTitle.trim() || !editForm.companyName.trim()}
+                className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updating ? "Saving & Reingesting..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

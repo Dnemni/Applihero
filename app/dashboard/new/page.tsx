@@ -13,6 +13,11 @@ export default function NewJobPage() {
   const [jobTitle, setJobTitle] = useState("");
   const [company, setCompany] = useState("");
   const [description, setDescription] = useState("");
+  const [referralName, setReferralName] = useState("");
+  const [referralCompany, setReferralCompany] = useState("");
+  const [referralTitle, setReferralTitle] = useState("");
+  const [referralLinkedIn, setReferralLinkedIn] = useState("");
+  const [referralRelation, setReferralRelation] = useState("");
 
   useEffect(() => {
     checkAuth();
@@ -30,7 +35,7 @@ export default function NewJobPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    
+
     if (!jobTitle.trim() || !company.trim()) {
       alert("Please fill in job title and company");
       return;
@@ -52,9 +57,25 @@ export default function NewJobPage() {
         return;
       }
 
+      // Create referral if provided
+      if (referralName.trim()) {
+        try {
+          await JobService.createReferral(newJob.id, {
+            person_name: referralName,
+            company: referralCompany || null,
+            title: referralTitle || null,
+            linkedin_url: referralLinkedIn || null,
+            relation: referralRelation || null,
+          });
+        } catch (error) {
+          console.error("Error creating referral:", error);
+          // Don't block job creation if referral fails
+        }
+      }
+
       // Get current user
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (user) {
         // Ingest documents into RAG system (wait for completion)
         try {
@@ -63,7 +84,7 @@ export default function NewJobPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: user.id }),
           });
-          
+
           if (!ingestResponse.ok) {
             console.warn("Document ingestion failed, but continuing...");
           }
@@ -123,7 +144,7 @@ export default function NewJobPage() {
             </div>
             <span className="text-xl font-bold text-gray-900">Applihero</span>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <a
               href="/profile"
@@ -148,67 +169,130 @@ export default function NewJobPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-8 py-12">
-      <div className="w-full max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">New application</h1>
-        <p className="text-sm text-gray-600">
-          Paste the job details so AppliHero can coach you.
-        </p>
-      </div>
+        <div className="w-full max-w-2xl space-y-6">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">New application</h1>
+            <p className="text-sm text-gray-600">
+              Paste the job details so AppliHero can coach you.
+            </p>
+          </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Job title *</label>
-          <input
-            type="text"
-            value={jobTitle}
-            onChange={(e) => setJobTitle(e.target.value)}
-            required
-            disabled={submitting}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            placeholder="Applied Scientist Intern"
-          />
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Job title *</label>
+                <input
+                  type="text"
+                  value={jobTitle}
+                  onChange={(e) => setJobTitle(e.target.value)}
+                  required
+                  disabled={submitting}
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="Applied Scientist Intern"
+                />
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <label className="block text-sm font-medium text-gray-700 mb-3">Referral (optional)</label>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Person's name</label>
+                    <input
+                      type="text"
+                      value={referralName}
+                      onChange={(e) => setReferralName(e.target.value)}
+                      disabled={submitting}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Company</label>
+                    <input
+                      type="text"
+                      value={referralCompany}
+                      onChange={(e) => setReferralCompany(e.target.value)}
+                      disabled={submitting}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="OpenAI"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
+                    <input
+                      type="text"
+                      value={referralTitle}
+                      onChange={(e) => setReferralTitle(e.target.value)}
+                      disabled={submitting}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Senior Engineer"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">LinkedIn URL</label>
+                    <input
+                      type="url"
+                      value={referralLinkedIn}
+                      onChange={(e) => setReferralLinkedIn(e.target.value)}
+                      disabled={submitting}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="https://linkedin.com/in/johndoe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">How you know them</label>
+                    <input
+                      type="text"
+                      value={referralRelation}
+                      onChange={(e) => setReferralRelation(e.target.value)}
+                      disabled={submitting}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Former colleague, College friend, etc."
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Company *</label>
+              <input
+                type="text"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                required
+                disabled={submitting}
+                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder="OpenAI"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Job description (optional)</label>
+              <textarea
+                rows={8}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={submitting}
+                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder="Paste the full job description here..."
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {submitting ? "Creating..." : "Create job session"}
+              </button>
+              <a
+                href="/dashboard"
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </a>
+            </div>
+          </form>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Company *</label>
-          <input
-            type="text"
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
-            required
-            disabled={submitting}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            placeholder="OpenAI"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Job description (optional)</label>
-          <textarea
-            rows={8}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={submitting}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            placeholder="Paste the full job description here..."
-          />
-        </div>
-        <div className="flex gap-3">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {submitting ? "Creating..." : "Create job session"}
-          </button>
-          <a
-            href="/dashboard"
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </a>
-        </div>
-      </form>
-    </div>
       </div>
     </div>
   );

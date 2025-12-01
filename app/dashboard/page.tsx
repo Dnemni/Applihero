@@ -1,9 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { JobService } from "@/lib/supabase/services";
+import { JobService, ProfileService } from "@/lib/supabase/services";
 import type { Job } from "@/lib/supabase/types";
 
 type JobSessionCard = {
@@ -23,21 +23,36 @@ const statusStyles = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<JobSessionCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const [userName, setUserName] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showOnboardingDialog, setShowOnboardingDialog] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [showTutorialCompleted, setShowTutorialCompleted] = useState(false);
 
   useEffect(() => {
     checkAuthAndLoadJobs();
   }, []);
 
+  useEffect(() => {
+    // Check for tutorial completed message
+    if (searchParams.get('onboarding') === 'completed') {
+      setShowTutorialCompleted(true);
+      setTimeout(() => {
+        setShowTutorialCompleted(false);
+        router.replace('/dashboard');
+      }, 5000);
+    }
+  }, [searchParams, router]);
+
   async function checkAuthAndLoadJobs() {
     // Check if user is authenticated
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       setRedirecting(true);
       setTimeout(() => router.push("/login"), 1500);
@@ -48,6 +63,13 @@ export default function DashboardPage() {
     const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || "there";
     setUserName(fullName);
 
+    // Check onboarding status
+    const profile = await ProfileService.getCurrentProfile();
+    if (profile && !profile.onboarding_completed) {
+      setShowOnboardingDialog(true);
+      setOnboardingStep(0);
+    }
+
     // Load jobs
     await loadJobs();
   }
@@ -55,7 +77,7 @@ export default function DashboardPage() {
   async function loadJobs() {
     setLoading(true);
     const jobsData = await JobService.getAllJobs();
-    
+
     if (jobsData) {
       const formattedJobs: JobSessionCard[] = jobsData.map(job => ({
         id: job.id,
@@ -67,13 +89,25 @@ export default function DashboardPage() {
       }));
       setJobs(formattedJobs);
     }
-    
+
     setLoading(false);
   }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push("/login");
+  }
+
+  function handleSkipDashboardOnboarding() {
+    setShowOnboardingDialog(false);
+    // Redirect to profile for resume/transcript onboarding
+    router.push("/profile");
+  }
+
+  function completeDashboardOnboarding() {
+    setShowOnboardingDialog(false);
+    // Redirect to profile for resume/transcript onboarding
+    router.push("/profile");
   }
 
   async function handleDeleteJob(jobId: string, jobTitle: string, companyName: string) {
@@ -118,7 +152,7 @@ export default function DashboardPage() {
     const date = new Date(dateString);
     const now = new Date();
     const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-    
+
     if (diffInHours < 1) return "Just now";
     if (diffInHours < 24) return `${diffInHours}h ago`;
     if (diffInHours < 48) return "Yesterday";
@@ -150,7 +184,7 @@ export default function DashboardPage() {
             </div>
             <span className="text-xl font-bold text-gray-900">Applihero</span>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <a
               href="/profile"
@@ -184,16 +218,16 @@ export default function DashboardPage() {
               {jobs.length === 0 ? "Start tracking your job applications" : "Track roles you're applying to and jump back into coaching."}
             </p>
           </div>
-        <a
-          href="/dashboard/new"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-indigo-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all active:scale-[0.98]"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New application
-        </a>
-      </div>
+          <a
+            href="/dashboard/new"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-indigo-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all active:scale-[0.98]"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New application
+          </a>
+        </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
@@ -287,7 +321,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <a href={`/jobs/${job.id}`} className="block mt-3">
                     <div className="flex items-center gap-3 text-xs text-gray-500">
                       <span className="flex items-center gap-1">
@@ -298,7 +332,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                   </a>
-                  
+
                   <a href={`/jobs/${job.id}`} className="absolute right-4 bottom-4 opacity-0 group-hover:opacity-100 transition-opacity">
                     <svg className="h-5 w-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -310,6 +344,92 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Tutorial Completed Banner */}
+      {showTutorialCompleted && (
+        <div className="fixed inset-x-0 top-0 z-50 flex justify-center p-4">
+          <div className="rounded-lg bg-green-500 px-6 py-3 text-white shadow-lg flex items-center space-x-2">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">Tutorial completed!</span>
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding Dialog */}
+      {showOnboardingDialog && (
+        <div className="fixed right-0 top-0 z-50 h-full w-full max-w-md p-6 pointer-events-none">
+          <div className="relative h-full flex items-center">
+            <div className="w-full rounded-2xl bg-white p-6 shadow-2xl border border-gray-200 pointer-events-auto">
+              {onboardingStep === 0 && (
+                <>
+                  <div className="mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Welcome to Applihero! 👋</h2>
+                    <p className="text-sm text-gray-600">
+                      Let's take a quick tour of your dashboard. Here you can see all your job applications and track your progress.
+                    </p>
+                  </div>
+                  <div className="mb-6">
+                    <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
+                      <p className="text-sm text-indigo-900 font-medium mb-2">💡 Your Dashboard</p>
+                      <p className="text-xs text-indigo-700">
+                        This is where all your job applications live. You can see their status, when you last worked on them, and access them anytime.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setOnboardingStep(1)}
+                      className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={handleSkipDashboardOnboarding}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      Skip
+                    </button>
+                  </div>
+                </>
+              )}
+              {onboardingStep === 1 && (
+                <>
+                  <div className="mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Create New Applications</h2>
+                    <p className="text-sm text-gray-600">
+                      Click the "New application" button to start tracking a job. You'll paste the job description and Applihero will help you prepare!
+                    </p>
+                  </div>
+                  <div className="mb-6">
+                    <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
+                      <p className="text-sm text-indigo-900 font-medium mb-2">🚀 New Application Feature</p>
+                      <p className="text-xs text-indigo-700">
+                        When you create a new application, Applihero will analyze the job description and help you craft personalized answers to application questions.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={completeDashboardOnboarding}
+                      className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      Continue to Profile
+                    </button>
+                    <button
+                      onClick={handleSkipDashboardOnboarding}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      Skip
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

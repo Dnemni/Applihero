@@ -37,7 +37,8 @@ export class JobService {
       .from('jobs')
       .select(`
         *,
-        questions (*)
+        questions (*),
+        referrals (*)
       `)
       .eq('id', jobId)
       .eq('user_id', user.id)
@@ -91,7 +92,7 @@ export class JobService {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const { data, error} = await supabase
+    const { data, error } = await supabase
       .from('jobs')
       .update(updates)
       .eq('id', jobId)
@@ -178,5 +179,53 @@ export class JobService {
       inProgress: jobs.filter(j => j.status === 'In Progress').length,
       submitted: jobs.filter(j => j.status === 'Submitted').length
     };
+  }
+
+  /**
+   * Create a referral for a job
+   */
+  static async createReferral(
+    jobId: string,
+    referralData: {
+      person_name: string;
+      company?: string | null;
+      title?: string | null;
+      linkedin_url?: string | null;
+      relation?: string | null;
+    }
+  ): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    // Verify the job belongs to the user
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('id', jobId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!job) {
+      console.error('Job not found or access denied');
+      return false;
+    }
+
+    const { error } = await supabase
+      .from('referrals')
+      .insert({
+        job_id: jobId,
+        person_name: referralData.person_name,
+        company: referralData.company || null,
+        title: referralData.title || null,
+        linkedin_url: referralData.linkedin_url || null,
+        relation: referralData.relation || null,
+      });
+
+    if (error) {
+      console.error('Error creating referral:', error);
+      return false;
+    }
+
+    return true;
   }
 }

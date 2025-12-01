@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Ensure SVGs respect their size classes */
+svg {
+    display: inline-block;
+    vertical-align: middle;
+}

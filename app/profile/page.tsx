@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
 import type { Profile } from "@/lib/supabase/types";
 import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overlay";
+import { Footer } from "@/components/footer";
+import { Header } from "@/components/header";
 import {
   getOnboardingState,
   setOnboardingState,
@@ -36,11 +38,11 @@ export default function ProfilePage() {
   const [uploadedTranscript, setUploadedTranscript] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptInputRef = useRef<HTMLInputElement>(null);
-  
+
   // New onboarding system
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  
+
   // Delete account
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
@@ -119,7 +121,7 @@ export default function ProfilePage() {
     if (updated) {
       setProfile(updated);
       alert("Profile updated successfully!");
-      
+
       // Auto-complete profile onboarding if on the last step
       if (showOnboarding && onboardingStep === 4) {
         setTimeout(() => handleOnboardingComplete(), 800);
@@ -203,10 +205,6 @@ export default function ProfilePage() {
     router.push("/dashboard");
   };
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.push("/login");
-  }
 
   async function handleResumeUpload(file: File) {
     if (file.type !== "application/pdf") {
@@ -232,7 +230,7 @@ export default function ProfilePage() {
           } else {
             alert("Resume uploaded! Text extraction is processing...");
           }
-          
+
           // Auto-advance onboarding if on resume step
           if (showOnboarding && onboardingStep === 1) {
             setTimeout(() => handleOnboardingNext(), 500);
@@ -270,7 +268,7 @@ export default function ProfilePage() {
           } else {
             alert("Transcript uploaded! Text extraction is processing...");
           }
-          
+
           // Auto-advance onboarding if on transcript step
           if (showOnboarding && onboardingStep === 2) {
             setTimeout(() => handleOnboardingNext(), 500);
@@ -364,7 +362,7 @@ export default function ProfilePage() {
     }
 
     setDeleting(true);
-    
+
     try {
       // First verify password by attempting to sign in
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -424,43 +422,10 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
-      {/* Top Navigation */}
-      <div className="border-b border-gray-200/50 bg-white/60 backdrop-blur-lg">
-        <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-600 to-blue-600 flex items-center justify-center">
-              <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-gray-900">Applihero</span>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex flex-col">
+      <Header showDashboard />
 
-          <div className="flex items-center gap-3">
-            <a
-              href="/dashboard"
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white/80 backdrop-blur-sm px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-              Dashboard
-            </a>
-            <button
-              onClick={handleSignOut}
-              className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-all"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full max-w-4xl mx-auto px-8 py-12">
+      <div className="w-full max-w-4xl mx-auto px-8 py-12 flex-1">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Profile Settings</h1>
           <p className="mt-1 text-sm text-gray-600">
@@ -869,6 +834,8 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      <Footer />
     </div>
   );
 }

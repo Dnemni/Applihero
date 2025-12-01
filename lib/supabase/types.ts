@@ -26,6 +26,7 @@ export interface Database {
           resume_url: string | null;
           transcript_url: string | null;
           email_notifications: boolean;
+          onboarding_completed: boolean;
           marketing_emails: boolean;
           active: boolean;
           created_at: string;
@@ -40,6 +41,7 @@ export interface Database {
           resume_url?: string | null;
           transcript_url?: string | null;
           email_notifications?: boolean;
+          onboarding_completed?: boolean;
           marketing_emails?: boolean;
           active?: boolean;
           created_at?: string;
@@ -54,6 +56,7 @@ export interface Database {
           resume_url?: string | null;
           transcript_url?: string | null;
           email_notifications?: boolean;
+          onboarding_completed?: boolean;
           marketing_emails?: boolean;
           active?: boolean;
           created_at?: string;

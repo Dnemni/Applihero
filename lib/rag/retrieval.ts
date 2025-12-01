@@ -23,7 +23,7 @@ export async function retrieveContext(opts: {
       match_count: matchCount,
       match_user_id: userId,
       match_job_id: jobId,
-    }
+    } as any
   );
 
   if (error) throw error;

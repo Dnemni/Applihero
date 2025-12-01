@@ -60,7 +60,6 @@ export default function SignupPage() {
         // Update the profile with name information
         const { error: profileError } = await supabase
           .from("profiles")
-          // @ts-expect-error - Supabase type inference issue
           .update({
             first_name: firstName,
             last_name: lastName,

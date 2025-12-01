@@ -15,14 +15,17 @@ export async function POST(
     .eq("id", questionId)
     .single();
 
-  if (error || !q) {
+  // Ensure proper typing for q
+  const question: { question_text: string; answer_text: string | null } | null = q as any;
+
+  if (error || !question) {
     return NextResponse.json({ error }, { status: 500 });
   }
 
   const ctx = await retrieveContext({
     userId,
     jobId,
-    query: q.answer_text ?? q.question_text,
+    query: question.answer_text ?? question.question_text,
   });
 
   const context = ctx.map((c) => c.content).join("\n---\n");
@@ -32,10 +35,10 @@ CONTEXT:
 ${context}
 
 QUESTION:
-${q.question_text}
+${question.question_text}
 
 ANSWER:
-${q.answer_text}
+${question.answer_text}
 
 TASK:
 Evaluating as a job application coach, respond in JSON with:

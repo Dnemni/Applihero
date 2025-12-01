@@ -315,12 +315,16 @@ export class JobService {
         return false;
       }
     } else {
-      // Create new referral (with minimal data - person_name is required)
+      // Create new referral (person_name is required)
+      if (!referralData.person_name) {
+        console.error('person_name is required to create a new referral');
+        return false;
+      }
       const { error } = await supabase
         .from('referrals')
         .insert({
           job_id: jobId,
-          person_name: 'Referral Contact', // Required field - placeholder name
+          person_name: referralData.person_name,
           linkedin_url: referralData.linkedin_url || null,
           relation: referralData.relation || null,
         });

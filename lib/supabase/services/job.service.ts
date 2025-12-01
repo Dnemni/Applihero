@@ -228,4 +228,109 @@ export class JobService {
 
     return true;
   }
+
+  /**
+   * Get referral for a job
+   */
+  static async getReferral(jobId: string): Promise<any | null> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    // Verify the job belongs to the user
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('id', jobId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!job) {
+      console.error('Job not found or access denied');
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('referrals')
+      .select('*')
+      .eq('job_id', jobId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No referral found
+        return null;
+      }
+      console.error('Error fetching referral:', error);
+      return null;
+    }
+
+    return data;
+  }
+
+  /**
+   * Update or create a referral for a job
+   */
+  static async updateReferral(
+    jobId: string,
+    referralData: {
+      linkedin_url?: string | null;
+      relation?: string | null;
+    }
+  ): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    // Verify the job belongs to the user
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('id', jobId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!job) {
+      console.error('Job not found or access denied');
+      return false;
+    }
+
+    // Check if referral exists
+    const { data: existingReferral } = await supabase
+      .from('referrals')
+      .select('id')
+      .eq('job_id', jobId)
+      .single();
+
+    if (existingReferral) {
+      // Update existing referral
+      const { error } = await supabase
+        .from('referrals')
+        .update({
+          linkedin_url: referralData.linkedin_url || null,
+          relation: referralData.relation || null,
+        })
+        .eq('job_id', jobId);
+
+      if (error) {
+        console.error('Error updating referral:', error);
+        return false;
+      }
+    } else {
+      // Create new referral (with minimal data - person_name is required)
+      const { error } = await supabase
+        .from('referrals')
+        .insert({
+          job_id: jobId,
+          person_name: 'Referral Contact', // Required field - placeholder name
+          linkedin_url: referralData.linkedin_url || null,
+          relation: referralData.relation || null,
+        });
+
+      if (error) {
+        console.error('Error creating referral:', error);
+        return false;
+      }
+    }
+
+    return true;
+  }
 }

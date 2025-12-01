@@ -15,14 +15,17 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [redirecting, setRedirecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState<string>("");
-  const [showDescriptionModal, setShowDescriptionModal] = useState(false);
+  const [showReferralModal, setShowReferralModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackScore, setFeedbackScore] = useState<number | null>(null);
   const [feedbackNotes, setFeedbackNotes] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [editForm, setEditForm] = useState({ jobTitle: "", companyName: "", jobDescription: "" });
+  const [referralForm, setReferralForm] = useState({ linkedin_url: "", relation: "" });
+  const [referral, setReferral] = useState<any | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [updatingReferral, setUpdatingReferral] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -32,7 +35,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
   async function checkAuthAndLoadJob() {
     // Check if user is authenticated
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       setRedirecting(true);
       setTimeout(() => router.push("/login"), 1500);
@@ -52,9 +55,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
     if (isInitialLoad) {
       setLoading(true);
     }
-    
+
     const jobData = await JobService.getJobById(params.id);
-    
+
     if (!jobData) {
       // Job not found or doesn't belong to user
       router.push("/dashboard");
@@ -62,6 +65,21 @@ export default function JobPage({ params }: { params: { id: string } }) {
     }
 
     setJob(jobData);
+
+    // Load referral data if it exists
+    if (jobData) {
+      const referralData = await JobService.getReferral(jobData.id);
+      if (referralData) {
+        setReferral(referralData);
+        setReferralForm({
+          linkedin_url: referralData.linkedin_url || "",
+          relation: referralData.relation || "",
+        });
+      } else {
+        setReferral(null);
+      }
+    }
+
     if (isInitialLoad) {
       setLoading(false);
     }
@@ -69,21 +87,21 @@ export default function JobPage({ params }: { params: { id: string } }) {
 
   async function handleSubmitApplication() {
     if (!job) return;
-    
+
     if (!confirm("Are you sure you want to mark this application as submitted?")) {
       return;
     }
 
     setSubmitting(true);
     const updated = await JobService.updateJobStatus(job.id, "Submitted");
-    
+
     if (updated) {
       setJob({ ...job, status: "Submitted" });
       alert("Application marked as submitted!");
     } else {
       alert("Failed to update application status");
     }
-    
+
     setSubmitting(false);
   }
 
@@ -104,7 +122,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
 
   async function handleSaveEdit() {
     if (!job || !userId) return;
-    
+
     setUpdating(true);
     try {
       const response = await fetch(`/api/jobs/${job.id}`, {
@@ -132,9 +150,39 @@ export default function JobPage({ params }: { params: { id: string } }) {
     setUpdating(false);
   }
 
+  async function handleSaveReferral() {
+    if (!job) return;
+
+    setUpdatingReferral(true);
+    try {
+      const success = await JobService.updateReferral(job.id, {
+        linkedin_url: referralForm.linkedin_url || null,
+        relation: referralForm.relation || null,
+      });
+
+      if (success) {
+        // Reload referral data
+        const updatedReferral = await JobService.getReferral(job.id);
+        if (updatedReferral) {
+          setReferral(updatedReferral);
+          setShowReferralModal(false);
+          alert("Referral updated successfully!");
+        } else {
+          alert("Referral updated, but failed to refresh data. Please try again.");
+        }
+      } else {
+        alert("Failed to update referral");
+      }
+    } catch (err) {
+      console.error('Update referral error:', err);
+      alert("Failed to update referral");
+    }
+    setUpdatingReferral(false);
+  }
+
   async function handleDelete() {
     if (!job) return;
-    
+
     if (!confirm(`Are you sure you want to delete this job application for ${job.company_name}? This will delete all related data including chat history and answers.`)) {
       return;
     }
@@ -202,7 +250,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
         <div className="mb-8 flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <a 
+              <a
                 href="/dashboard"
                 className="inline-flex items-center text-sm text-gray-600 hover:text-indigo-600 transition-colors"
               >
@@ -212,7 +260,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
                 Back to dashboard
               </a>
               <span className="text-gray-400">|</span>
-              <a 
+              <a
                 href="/profile"
                 className="inline-flex items-center text-sm text-gray-600 hover:text-indigo-600 transition-colors"
               >
@@ -250,13 +298,13 @@ export default function JobPage({ params }: { params: { id: string } }) {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setShowDescriptionModal(true)}
+              onClick={() => setShowReferralModal(true)}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all shadow-sm"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
-              View Description
+              Referral
             </button>
             <button
               onClick={handleOpenEdit}
@@ -277,7 +325,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
               </svg>
               {deleting ? "Deleting..." : "Delete"}
             </button>
-            <button 
+            <button
               onClick={handleSubmitApplication}
               disabled={submitting || job.status === "Submitted"}
               className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
@@ -372,117 +420,185 @@ export default function JobPage({ params }: { params: { id: string } }) {
                   }
                 }}
               />
-                  {showFeedbackModal && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowFeedbackModal(false)}>
-                      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-                        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-500 to-pink-400">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h2 className="text-xl font-bold text-white">Answer Feedback</h2>
-                              <p className="text-sm text-purple-100 mt-1">AI-powered review of your answer</p>
-                            </div>
-                            <button 
-                              onClick={() => setShowFeedbackModal(false)} 
-                              className="text-white/80 hover:text-white transition-colors"
-                            >
-                              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </div>
+              {showFeedbackModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowFeedbackModal(false)}>
+                  <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                    <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-500 to-pink-400">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-xl font-bold text-white">Answer Feedback</h2>
+                          <p className="text-sm text-purple-100 mt-1">AI-powered review of your answer</p>
                         </div>
-                        <div className="p-6 overflow-y-auto max-h-[calc(80vh-200px)]">
-                          {feedbackLoading ? (
-                            <div className="flex flex-col items-center justify-center py-12">
-                              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
-                              <p className="text-gray-600 font-medium">Analyzing your answer...</p>
-                              <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
-                            </div>
-                          ) : feedbackScore !== null && (
-                            <div className="flex items-center gap-4 mb-6">
-                              <div className="flex-shrink-0">
-                                <div className="relative h-20 w-20">
-                                  <svg className="transform -rotate-90" width="80" height="80">
-                                    <circle cx="40" cy="40" r="32" stroke="#e5e7eb" strokeWidth="8" fill="none" />
-                                    <circle cx="40" cy="40" r="32" stroke="url(#gradient)" strokeWidth="8" fill="none" strokeDasharray={`${(feedbackScore / 10) * 201} 201`} strokeLinecap="round" />
-                                    <defs>
-                                      <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                                        <stop offset="0%" stopColor="#a855f7" />
-                                        <stop offset="100%" stopColor="#ec4899" />
-                                      </linearGradient>
-                                    </defs>
-                                  </svg>
-                                  <div className="absolute inset-0 flex items-center justify-center">
-                                    <span className="text-2xl font-bold text-gray-900">{feedbackScore}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex-1">
-                                <h3 className="text-lg font-bold text-gray-900">Score: {feedbackScore}/10</h3>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  {feedbackScore >= 8 ? "Excellent work! Your answer is strong." :
-                                   feedbackScore >= 6 ? "Good answer with room for improvement." :
-                                   feedbackScore >= 4 ? "Decent start, but needs significant work." :
-                                   "This answer needs major revisions."}
-                                </p>
-                              </div>
-                            </div>
-                          )}
-              
-                          {feedbackNotes && (
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-3">Detailed Feedback:</h4>
-                              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-100">
-                                <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
-                                  {feedbackNotes}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        {!feedbackLoading && (
-                          <div className="p-6 border-t border-gray-200 flex justify-between items-center bg-gray-50">
-                            <p className="text-xs text-gray-500">
-                              💡 Use this feedback to improve your answer, then request new feedback to see your progress.
-                            </p>
-                            <button
-                              onClick={() => setShowFeedbackModal(false)}
-                              className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-400 rounded-lg hover:from-purple-600 hover:to-pink-500 transition-colors"
-                            >
-                              Got it!
-                            </button>
-                          </div>
-                        )}
+                        <button
+                          onClick={() => setShowFeedbackModal(false)}
+                          className="text-white/80 hover:text-white transition-colors"
+                        >
+                          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
-                  )}
+                    <div className="p-6 overflow-y-auto max-h-[calc(80vh-200px)]">
+                      {feedbackLoading ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+                          <p className="text-gray-600 font-medium">Analyzing your answer...</p>
+                          <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
+                        </div>
+                      ) : feedbackScore !== null && (
+                        <div className="flex items-center gap-4 mb-6">
+                          <div className="flex-shrink-0">
+                            <div className="relative h-20 w-20">
+                              <svg className="transform -rotate-90" width="80" height="80">
+                                <circle cx="40" cy="40" r="32" stroke="#e5e7eb" strokeWidth="8" fill="none" />
+                                <circle cx="40" cy="40" r="32" stroke="url(#gradient)" strokeWidth="8" fill="none" strokeDasharray={`${(feedbackScore / 10) * 201} 201`} strokeLinecap="round" />
+                                <defs>
+                                  <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" stopColor="#a855f7" />
+                                    <stop offset="100%" stopColor="#ec4899" />
+                                  </linearGradient>
+                                </defs>
+                              </svg>
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-2xl font-bold text-gray-900">{feedbackScore}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="text-lg font-bold text-gray-900">Score: {feedbackScore}/10</h3>
+                            <p className="text-sm text-gray-600 mt-1">
+                              {feedbackScore >= 8 ? "Excellent work! Your answer is strong." :
+                                feedbackScore >= 6 ? "Good answer with room for improvement." :
+                                  feedbackScore >= 4 ? "Decent start, but needs significant work." :
+                                    "This answer needs major revisions."}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {feedbackNotes && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Detailed Feedback:</h4>
+                          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-100">
+                            <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+                              {feedbackNotes}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {!feedbackLoading && (
+                      <div className="p-6 border-t border-gray-200 flex justify-between items-center bg-gray-50">
+                        <p className="text-xs text-gray-500">
+                          💡 Use this feedback to improve your answer, then request new feedback to see your progress.
+                        </p>
+                        <button
+                          onClick={() => setShowFeedbackModal(false)}
+                          className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-400 rounded-lg hover:from-purple-600 hover:to-pink-500 transition-colors"
+                        >
+                          Got it!
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      {/* View Description Modal */}
-      {showDescriptionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDescriptionModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+      {/* Referral Modal */}
+      {showReferralModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !updatingReferral && setShowReferralModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-200">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Job Description</h2>
-                <button onClick={() => setShowDescriptionModal(false)} className="text-gray-400 hover:text-gray-600">
+                <h2 className="text-xl font-bold text-gray-900">Referral Information</h2>
+                <button
+                  onClick={() => !updatingReferral && setShowReferralModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                  disabled={updatingReferral}
+                >
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
             </div>
-            <div className="p-6 overflow-y-auto max-h-[calc(80vh-140px)]">
-              {job.job_description ? (
-                <div className="prose prose-sm max-w-none">
-                  <p className="whitespace-pre-wrap text-gray-700">{job.job_description}</p>
-                </div>
-              ) : (
-                <p className="text-gray-500 italic">No job description available</p>
-              )}
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-200px)] space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Person's Name</label>
+                <input
+                  type="text"
+                  value={referralForm.person_name || ""}
+                  onChange={e => setReferralForm({ ...referralForm, person_name: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Jane Doe"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                <input
+                  type="text"
+                  value={referralForm.company || ""}
+                  onChange={e => setReferralForm({ ...referralForm, company: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Acme Corp"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={referralForm.title || ""}
+                  onChange={e => setReferralForm({ ...referralForm, title: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Senior Engineer"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
+                <input
+                  type="url"
+                  value={referralForm.linkedin_url}
+                  onChange={e => setReferralForm({ ...referralForm, linkedin_url: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="https://linkedin.com/in/johndoe"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">How you know them</label>
+                <input
+                  type="text"
+                  value={referralForm.relation}
+                  onChange={e => setReferralForm({ ...referralForm, relation: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Former colleague, College friend, etc."
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowReferralModal(false)}
+                disabled={updatingReferral}
+                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveReferral}
+                disabled={updatingReferral}
+                className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updatingReferral ? "Saving..." : "Save Changes"}
+              </button>
             </div>
           </div>
         </div>
@@ -508,7 +624,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
                 <input
                   type="text"
                   value={editForm.jobTitle}
-                  onChange={e => setEditForm({...editForm, jobTitle: e.target.value})}
+                  onChange={e => setEditForm({ ...editForm, jobTitle: e.target.value })}
                   disabled={updating}
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50"
                 />
@@ -518,7 +634,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
                 <input
                   type="text"
                   value={editForm.companyName}
-                  onChange={e => setEditForm({...editForm, companyName: e.target.value})}
+                  onChange={e => setEditForm({ ...editForm, companyName: e.target.value })}
                   disabled={updating}
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50"
                 />
@@ -528,7 +644,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
                 <textarea
                   rows={10}
                   value={editForm.jobDescription}
-                  onChange={e => setEditForm({...editForm, jobDescription: e.target.value})}
+                  onChange={e => setEditForm({ ...editForm, jobDescription: e.target.value })}
                   disabled={updating}
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50"
                 />

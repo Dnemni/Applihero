@@ -14,7 +14,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadingTranscript, setUploadingTranscript] = useState(false);
-  
+
   // Form fields
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -24,11 +24,15 @@ export default function ProfilePage() {
   const [transcriptText, setTranscriptText] = useState("");
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [marketingEmails, setMarketingEmails] = useState(false);
-  
+
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedTranscript, setUploadedTranscript] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptInputRef = useRef<HTMLInputElement>(null);
+  const [showOnboardingDialog, setShowOnboardingDialog] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const resumeSectionRef = useRef<HTMLDivElement>(null);
+  const transcriptSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProfile();
@@ -36,7 +40,7 @@ export default function ProfilePage() {
 
   async function loadProfile() {
     setLoading(true);
-    
+
     // Check if user is authenticated
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -44,49 +48,55 @@ export default function ProfilePage() {
       setTimeout(() => router.push("/login"), 1500);
       return;
     }
-    
+
     const data = await ProfileService.getCurrentProfile();
-    
+
     if (data) {
       setProfile(data);
       setResumeText(data.resume_text || "");
       setTranscriptText(data.transcript_text || "");
-      
+
       // Get auth user for metadata fallback
       const { data: { user } } = await supabase.auth.getUser();
       const fullName = user?.user_metadata?.full_name || "";
-      
+
       // Use profile data if available, otherwise try to extract from auth metadata
       let firstName = data.first_name || "";
       let lastName = data.last_name || "";
-      
+
       // If no name in profile but we have full_name from auth, split it
       if (!firstName && !lastName && fullName) {
         const nameParts = fullName.trim().split(" ");
         firstName = nameParts[0] || "";
         lastName = nameParts.slice(1).join(" ") || "";
-        
+
         // Update the profile in the background
         ProfileService.updateProfile({
           first_name: firstName,
           last_name: lastName,
         });
       }
-      
+
       setFirstName(firstName);
       setLastName(lastName);
       setEmail(data.email || "");
       setBio(data.bio || "");
       setEmailNotifications(data.email_notifications);
       setMarketingEmails(data.marketing_emails);
+
+      // Check if onboarding is needed
+      if (!data.onboarding_completed) {
+        setShowOnboardingDialog(true);
+        setOnboardingStep(0);
+      }
     }
-    
+
     setLoading(false);
   }
 
   async function handleSaveProfile() {
     setSaving(true);
-    
+
     const updated = await ProfileService.updateProfile({
       first_name: firstName,
       last_name: lastName,
@@ -99,7 +109,7 @@ export default function ProfilePage() {
     } else {
       alert("Failed to update profile");
     }
-    
+
     setSaving(false);
   }
 
@@ -116,17 +126,22 @@ export default function ProfilePage() {
 
     setUploading(true);
     const url = await ProfileService.uploadResume(file);
-    
+
     if (url) {
       setUploadedFile(file);
-      
+
+      // Advance onboarding if in progress
+      if (showOnboardingDialog && onboardingStep === 0) {
+        setOnboardingStep(1);
+      }
+
       // Wait a moment for text extraction to complete
       setTimeout(async () => {
         const updatedProfile = await ProfileService.getCurrentProfile();
         if (updatedProfile) {
           setProfile(updatedProfile);
           setResumeText(updatedProfile.resume_text || "");
-          
+
           if (updatedProfile.resume_text) {
             alert(`Resume uploaded! Extracted ${updatedProfile.resume_text.length.toLocaleString()} characters for AI coaching.`);
           } else {
@@ -149,17 +164,22 @@ export default function ProfilePage() {
 
     setUploadingTranscript(true);
     const url = await ProfileService.uploadTranscript(file);
-    
+
     if (url) {
       setUploadedTranscript(file);
-      
+
+      // Complete onboarding if in progress (after transcript upload)
+      if (showOnboardingDialog) {
+        await completeOnboarding();
+      }
+
       // Wait a moment for text extraction to complete
       setTimeout(async () => {
         const updatedProfile = await ProfileService.getCurrentProfile();
         if (updatedProfile) {
           setProfile(updatedProfile);
           setTranscriptText(updatedProfile.transcript_text || "");
-          
+
           if (updatedProfile.transcript_text) {
             alert(`Transcript uploaded! Extracted ${updatedProfile.transcript_text.length.toLocaleString()} characters for AI coaching.`);
           } else {
@@ -171,6 +191,33 @@ export default function ProfilePage() {
     } else {
       alert("Failed to upload transcript");
       setUploadingTranscript(false);
+    }
+  }
+
+  async function completeOnboarding() {
+    const updated = await ProfileService.updateProfile({
+      onboarding_completed: true,
+    });
+
+    if (updated) {
+      setShowOnboardingDialog(false);
+      router.push("/dashboard?onboarding=completed");
+    }
+  }
+
+  function handleSkipOnboarding() {
+    completeOnboarding();
+  }
+
+  function handleNextOnboardingStep() {
+    if (onboardingStep === 0) {
+      // Scroll to resume section
+      resumeSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setOnboardingStep(1);
+    } else if (onboardingStep === 1) {
+      // Scroll to transcript section
+      transcriptSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setOnboardingStep(2);
     }
   }
 
@@ -223,7 +270,7 @@ export default function ProfilePage() {
 
   async function handleViewResume() {
     if (!profile?.resume_url) return;
-    
+
     const url = await ProfileService.getResumeUrl(profile.resume_url);
     if (url) {
       window.open(url, '_blank');
@@ -234,7 +281,7 @@ export default function ProfilePage() {
 
   async function handleViewTranscript() {
     if (!profile?.transcript_url) return;
-    
+
     const url = await ProfileService.getTranscriptUrl(profile.transcript_url);
     if (url) {
       window.open(url, '_blank');
@@ -249,7 +296,7 @@ export default function ProfilePage() {
     }
 
     const success = await ProfileService.deactivateAccount();
-    
+
     if (success) {
       router.push("/login");
     } else {
@@ -293,7 +340,7 @@ export default function ProfilePage() {
             </div>
             <span className="text-xl font-bold text-gray-900">Applihero</span>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <a
               href="/dashboard"
@@ -388,14 +435,14 @@ export default function ProfilePage() {
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
-              <button 
+              <button
                 onClick={() => loadProfile()}
                 disabled={saving}
                 className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={handleSaveProfile}
                 disabled={saving}
                 className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white hover:from-indigo-700 hover:to-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
@@ -411,10 +458,10 @@ export default function ProfilePage() {
             <p className="text-sm text-gray-600 mb-6">
               Upload your resume and transcript for personalized coaching.
             </p>
-            
+
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               {/* Resume Upload */}
-              <div>
+              <div ref={resumeSectionRef}>
                 <label className="block text-sm font-medium text-gray-700 mb-3">Resume</label>
                 <input
                   ref={fileInputRef}
@@ -424,7 +471,7 @@ export default function ProfilePage() {
                   disabled={uploading}
                   className="hidden"
                 />
-                <div 
+                <div
                   onClick={handleClick}
                   onDragOver={handleDragOver}
                   onDrop={handleDrop}
@@ -470,7 +517,7 @@ export default function ProfilePage() {
               </div>
 
               {/* Transcript Upload */}
-              <div>
+              <div ref={transcriptSectionRef}>
                 <label className="block text-sm font-medium text-gray-700 mb-3">Transcript</label>
                 <input
                   ref={transcriptInputRef}
@@ -480,7 +527,7 @@ export default function ProfilePage() {
                   disabled={uploadingTranscript}
                   className="hidden"
                 />
-                <div 
+                <div
                   onClick={handleTranscriptClick}
                   className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer"
                 >
@@ -523,7 +570,7 @@ export default function ProfilePage() {
                 )}
               </div>
             </div>
-            
+
             {/* AI Coaching Status */}
             <div className="mt-8 pt-8 border-t border-gray-200">
               <div className="mb-4">
@@ -532,7 +579,7 @@ export default function ProfilePage() {
                   Text is automatically extracted from your uploaded PDFs to enable personalized AI coaching.
                 </p>
               </div>
-              
+
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
                   <div className="flex items-center gap-3">
@@ -555,7 +602,7 @@ export default function ProfilePage() {
                     <span className="text-xs text-gray-400">No text extracted</span>
                   )}
                 </div>
-                
+
                 <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
                   <div className="flex items-center gap-3">
                     <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -584,7 +631,7 @@ export default function ProfilePage() {
           {/* Preferences */}
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Preferences</h2>
-            
+
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -596,16 +643,14 @@ export default function ProfilePage() {
                     setEmailNotifications(!emailNotifications);
                     handlePreferencesUpdate();
                   }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    emailNotifications ? "bg-indigo-600" : "bg-gray-200"
-                  }`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${emailNotifications ? "bg-indigo-600" : "bg-gray-200"
+                    }`}
                 >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    emailNotifications ? "translate-x-6" : "translate-x-1"
-                  }`} />
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${emailNotifications ? "translate-x-6" : "translate-x-1"
+                    }`} />
                 </button>
               </div>
-              
+
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-900">Marketing emails</p>
@@ -616,13 +661,11 @@ export default function ProfilePage() {
                     setMarketingEmails(!marketingEmails);
                     handlePreferencesUpdate();
                   }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    marketingEmails ? "bg-indigo-600" : "bg-gray-200"
-                  }`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${marketingEmails ? "bg-indigo-600" : "bg-gray-200"
+                    }`}
                 >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    marketingEmails ? "translate-x-6" : "translate-x-1"
-                  }`} />
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${marketingEmails ? "translate-x-6" : "translate-x-1"
+                    }`} />
                 </button>
               </div>
             </div>
@@ -643,6 +686,104 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Onboarding Dialog */}
+      {showOnboardingDialog && (
+        <div className="fixed right-0 top-0 z-50 h-full w-full max-w-md p-6 pointer-events-none">
+          <div className="relative h-full flex items-center">
+            <div className="w-full rounded-2xl bg-white p-6 shadow-2xl border border-gray-200 pointer-events-auto">
+              {onboardingStep === 0 && (
+                <>
+                  <div className="mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume 📄</h2>
+                    <p className="text-sm text-gray-600">
+                      Upload your resume so Applihero can extract your skills, experience, and education to provide personalized coaching.
+                    </p>
+                  </div>
+                  <div className="mb-6">
+                    <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
+                      <p className="text-sm text-indigo-900 font-medium mb-2">💡 Why upload your resume?</p>
+                      <p className="text-xs text-indigo-700">
+                        Applihero will analyze your resume to understand your background and help you tailor your application answers to match your experience.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleNextOnboardingStep}
+                      className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={handleSkipOnboarding}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      Skip for now
+                    </button>
+                  </div>
+                </>
+              )}
+              {onboardingStep === 1 && (
+                <>
+                  <div className="mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Transcript 🎓</h2>
+                    <p className="text-sm text-gray-600">
+                      Upload your transcript to help Applihero understand your academic background and coursework.
+                    </p>
+                  </div>
+                  <div className="mb-6">
+                    <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
+                      <p className="text-sm text-indigo-900 font-medium mb-2">💡 Why upload your transcript?</p>
+                      <p className="text-xs text-indigo-700">
+                        Your transcript helps Applihero understand your academic achievements and can be used to highlight relevant coursework in your applications.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleNextOnboardingStep}
+                      className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={handleSkipOnboarding}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      Skip for now
+                    </button>
+                  </div>
+                </>
+              )}
+              {onboardingStep === 2 && (
+                <>
+                  <div className="mb-4">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">You're all set! 🎉</h2>
+                    <p className="text-sm text-gray-600">
+                      You can upload your resume and transcript anytime from your profile. Let's get started with your first job application!
+                    </p>
+                  </div>
+                  <div className="mb-6">
+                    <div className="rounded-lg bg-green-50 p-4 border border-green-200">
+                      <p className="text-sm text-green-900 font-medium mb-2">✨ Ready to go!</p>
+                      <p className="text-xs text-green-700">
+                        Head back to the dashboard to create your first job application and start getting personalized coaching.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSkipOnboarding}
+                    className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                  >
+                    Complete Tutorial
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

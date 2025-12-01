@@ -3,6 +3,7 @@
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { ProfileService } from "@/lib/supabase/services";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +26,13 @@ export default function LoginPage() {
       if (error) throw error;
 
       if (data.user) {
-        router.push("/dashboard");
+        // Check onboarding status
+        const profile = await ProfileService.getCurrentProfile();
+        if (profile && !profile.onboarding_completed) {
+          router.push("/profile");
+        } else {
+          router.push("/dashboard");
+        }
       }
     } catch (err: any) {
       setError(err.message || "Failed to sign in");
@@ -47,7 +54,7 @@ export default function LoginPage() {
             </div>
             <span className="text-xl font-bold text-gray-900">Applihero</span>
           </a>
-          
+
           <div className="flex items-center gap-3">
             <a
               href="/"
@@ -63,74 +70,74 @@ export default function LoginPage() {
       </div>
 
       <div className="flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900">
-            Welcome back
-          </h1>
-          <p className="mt-3 text-lg text-gray-600">
-            Sign in to continue your job search journey
-          </p>
-        </div>
-
-        <div className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl p-8 border border-gray-100">
-          {error && (
-            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3">
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Email address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={loading}
-                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                placeholder="you@example.com"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center">
-                <input type="checkbox" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                <span className="ml-2 text-gray-600">Remember me</span>
-              </label>
-              <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Forgot password?</a>
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <a href="/signup" className="font-semibold text-indigo-600 hover:text-indigo-700">
-                Sign up
-              </a>
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-gray-900">
+              Welcome back
+            </h1>
+            <p className="mt-3 text-lg text-gray-600">
+              Sign in to continue your job search journey
             </p>
           </div>
+
+          <div className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl p-8 border border-gray-100">
+            {error && (
+              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3">
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Email address</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="you@example.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <label className="flex items-center">
+                  <input type="checkbox" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                  <span className="ml-2 text-gray-600">Remember me</span>
+                </label>
+                <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Forgot password?</a>
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-lg bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Signing in..." : "Sign in"}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <p className="text-sm text-gray-600">
+                Don't have an account?{' '}
+                <a href="/signup" className="font-semibold text-indigo-600 hover:text-indigo-700">
+                  Sign up
+                </a>
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
       </div>
     </div>
   );

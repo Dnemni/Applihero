@@ -63,7 +63,39 @@ export class ProfileService {
       return null;
     }
 
+    // If bio was updated, parse it for hobbies/interests
+    if (updates.bio !== undefined) {
+      // Don't await - let it run asynchronously
+      this.parseBioForHobbies(user.id, updates.bio || '').catch((error) => {
+        console.error('Error parsing bio for hobbies:', error);
+        // Don't throw - parsing failure shouldn't block profile update
+      });
+    }
+
     return data;
+  }
+
+  /**
+   * Parse bio text and populate hobbies_interests table
+   */
+  private static async parseBioForHobbies(userId: string, bio: string): Promise<void> {
+    try {
+      const response = await fetch('/api/profile/parse-bio', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId, bio }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Bio parsing failed: ${error}`);
+      }
+    } catch (error) {
+      console.error('Failed to parse bio for hobbies:', error);
+      throw error;
+    }
   }
 
   /**

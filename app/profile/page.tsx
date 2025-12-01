@@ -742,7 +742,7 @@ export default function ProfilePage() {
                   </div>
                   <div className="flex gap-3">
                     <button
-                      onClick={() => setOnboardingStep(2)}
+                      onClick={handleNextOnboardingStep}
                       className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
                     >
                       Next

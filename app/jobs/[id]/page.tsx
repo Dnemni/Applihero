@@ -526,43 +526,39 @@ export default function JobPage({ params }: { params: { id: string } }) {
               </div>
             </div>
             <div className="p-6 overflow-y-auto max-h-[calc(80vh-200px)] space-y-4">
-              {referral && (
-                <>
-                  {referral.person_name && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Person's Name</label>
-                      <input
-                        type="text"
-                        value={referral.person_name}
-                        disabled
-                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 cursor-not-allowed"
-                      />
-                    </div>
-                  )}
-                  {referral.company && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
-                      <input
-                        type="text"
-                        value={referral.company}
-                        disabled
-                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 cursor-not-allowed"
-                      />
-                    </div>
-                  )}
-                  {referral.title && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                      <input
-                        type="text"
-                        value={referral.title}
-                        disabled
-                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 cursor-not-allowed"
-                      />
-                    </div>
-                  )}
-                </>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Person's Name</label>
+                <input
+                  type="text"
+                  value={referralForm.person_name || ""}
+                  onChange={e => setReferralForm({ ...referralForm, person_name: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Jane Doe"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                <input
+                  type="text"
+                  value={referralForm.company || ""}
+                  onChange={e => setReferralForm({ ...referralForm, company: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Acme Corp"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={referralForm.title || ""}
+                  onChange={e => setReferralForm({ ...referralForm, title: e.target.value })}
+                  disabled={updatingReferral}
+                  placeholder="Senior Engineer"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-indigo-500/70 focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
                 <input

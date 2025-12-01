@@ -73,13 +73,19 @@ export default function SignupPage() {
 
         setSuccess(true);
         // Check onboarding status and redirect accordingly
-        setTimeout(async () => {
-          const profile = await ProfileService.getCurrentProfile();
-          if (profile && !profile.onboarding_completed) {
-            router.push("/profile");
-          } else {
-            router.push("/dashboard");
-          }
+        setTimeout(() => {
+          (async () => {
+            try {
+              const profile = await ProfileService.getCurrentProfile();
+              if (profile && !profile.onboarding_completed) {
+                router.push("/profile");
+              } else {
+                router.push("/dashboard");
+              }
+            } catch (err) {
+              console.error("Error fetching profile or redirecting:", err);
+            }
+          })();
         }, 2000);
       }
     } catch (err: any) {

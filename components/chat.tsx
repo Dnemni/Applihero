@@ -2,11 +2,13 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChatService } from "@/lib/supabase/services/chat.service";
+import ReactMarkdown from 'react-markdown';
 
 export type ChatPanelProps = {
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
   jobId?: string;
+  userId?: string;
 };
 
 type Message = { role: "user" | "assistant"; content: string };
@@ -19,7 +21,7 @@ const initialMessages: Message[] = [
   }
 ];
 
-export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId }: ChatPanelProps) {
+export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId, userId }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,7 +62,7 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId }: Cha
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim() || isTyping) return;
+    if (!input.trim() || isTyping || !jobId || !userId) return;
     
     const userMessage = input.trim();
     setInput("");
@@ -68,42 +70,45 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId }: Cha
     // Optimistically add user message
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
 
-    // Save to database if jobId is provided
-    if (jobId) {
-      try {
-        await ChatService.addMessage(jobId, "user", userMessage);
-      } catch (error) {
-        console.error("Failed to save user message:", error);
-      }
-    }
-
     // Show typing indicator
     setIsTyping(true);
 
-    // Simulate AI response after a delay
-    setTimeout(async () => {
-      const responses = [
-        "That's a great question! Let me help you craft a compelling answer that highlights your strengths.",
-        "I can help you with that. Consider framing your experience in a way that directly addresses what they're looking for.",
-        "Good thinking! Let's work on positioning your skills and experience to stand out in your application.",
-        "Excellent! I'd recommend focusing on specific examples that demonstrate your impact and capabilities.",
-        "Let me guide you through this. The key is to connect your background with the role's requirements."
-      ];
+    try {
+      // Call RAG-enabled API endpoint
+      const reply = await ChatService.sendMessage(jobId, userId, userMessage);
       
-      const assistantMessage = responses[Math.floor(Math.random() * responses.length)];
-      
-      setMessages((prev) => [...prev, { role: "assistant", content: assistantMessage }]);
+      // Add empty assistant message to start streaming
+      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
       setIsTyping(false);
-
-      // Save assistant message to database
-      if (jobId) {
-        try {
-          await ChatService.addMessage(jobId, "assistant", assistantMessage);
-        } catch (error) {
-          console.error("Failed to save assistant message:", error);
-        }
+      
+      // Stream the response character by character
+      let currentText = "";
+      const words = reply.split(' ');
+      
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        currentText += (i === 0 ? '' : ' ') + word;
+        
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1] = { role: "assistant", content: currentText };
+          return newMessages;
+        });
+        
+        // Adjust delay: faster for short words, slightly slower for long ones
+        const delay = Math.min(30 + word.length * 2, 80);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    }, 2000); // 2 second delay for typing animation
+    } catch (error) {
+      console.error("Failed to get AI response:", error);
+      
+      // Show error message to user
+      setMessages((prev) => [...prev, { 
+        role: "assistant", 
+        content: "Sorry, I encountered an error. Please try again." 
+      }]);
+      setIsTyping(false);
+    }
   }
 
   return (
@@ -155,14 +160,39 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId }: Cha
               )}
             </div>
             <div
-              className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${
+              className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
                 m.role === "user"
                   ? "bg-gradient-to-br from-indigo-500 to-blue-400 text-white"
                   : "bg-white text-gray-900 border border-gray-100"
               }`}
               style={{wordBreak: 'break-word'}}
             >
-              {m.content}
+              {m.role === "assistant" ? (
+                <div className="prose prose-sm max-w-none">
+                  <ReactMarkdown
+                    components={{
+                      p: ({node, ...props}) => <p className="mb-2 last:mb-0 leading-relaxed" {...props} />,
+                      strong: ({node, ...props}) => <strong className="font-bold text-gray-900" {...props} />,
+                      ul: ({node, ...props}) => <ul className="list-disc list-inside mb-2 space-y-1" {...props} />,
+                      ol: ({node, ...props}) => <ol className="mb-2 space-y-2" {...props} />,
+                      li: ({node, ...props}) => <li className="ml-0 leading-relaxed" {...props} />,
+                      h1: ({node, ...props}) => <h1 className="text-lg font-bold mb-2" {...props} />,
+                      h2: ({node, ...props}) => <h2 className="text-base font-bold mb-1.5" {...props} />,
+                      h3: ({node, ...props}) => <h3 className="text-sm font-bold mb-1" {...props} />,
+                      code: ({node, inline, ...props}: any) => 
+                        inline ? (
+                          <code className="bg-gray-100 px-1 py-0.5 rounded text-xs" {...props} />
+                        ) : (
+                          <code className="block bg-gray-100 p-2 rounded text-xs my-2" {...props} />
+                        ),
+                    }}
+                  >
+                    {m.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                m.content
+              )}
             </div>
           </div>
         ))}

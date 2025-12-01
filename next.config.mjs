@@ -2,7 +2,13 @@
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
-    appDir: true
+    serverComponentsExternalPackages: ['pdf.js-extract', 'canvas']
+  },
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.resolve.alias.canvas = false;
+    }
+    return config;
   }
 };
 

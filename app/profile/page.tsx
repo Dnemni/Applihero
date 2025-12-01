@@ -20,6 +20,8 @@ export default function ProfilePage() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [bio, setBio] = useState("");
+  const [resumeText, setResumeText] = useState("");
+  const [transcriptText, setTranscriptText] = useState("");
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [marketingEmails, setMarketingEmails] = useState(false);
   
@@ -47,6 +49,8 @@ export default function ProfilePage() {
     
     if (data) {
       setProfile(data);
+      setResumeText(data.resume_text || "");
+      setTranscriptText(data.transcript_text || "");
       
       // Get auth user for metadata fallback
       const { data: { user } } = await supabase.auth.getUser();
@@ -115,13 +119,26 @@ export default function ProfilePage() {
     
     if (url) {
       setUploadedFile(file);
-      await loadProfile();
-      alert("Resume uploaded successfully!");
+      
+      // Wait a moment for text extraction to complete
+      setTimeout(async () => {
+        const updatedProfile = await ProfileService.getCurrentProfile();
+        if (updatedProfile) {
+          setProfile(updatedProfile);
+          setResumeText(updatedProfile.resume_text || "");
+          
+          if (updatedProfile.resume_text) {
+            alert(`Resume uploaded! Extracted ${updatedProfile.resume_text.length.toLocaleString()} characters for AI coaching.`);
+          } else {
+            alert("Resume uploaded! Text extraction is processing...");
+          }
+        }
+        setUploading(false);
+      }, 2000);
     } else {
       alert("Failed to upload resume");
+      setUploading(false);
     }
-    
-    setUploading(false);
   }
 
   async function handleTranscriptUpload(file: File) {
@@ -135,13 +152,26 @@ export default function ProfilePage() {
     
     if (url) {
       setUploadedTranscript(file);
-      await loadProfile();
-      alert("Transcript uploaded successfully!");
+      
+      // Wait a moment for text extraction to complete
+      setTimeout(async () => {
+        const updatedProfile = await ProfileService.getCurrentProfile();
+        if (updatedProfile) {
+          setProfile(updatedProfile);
+          setTranscriptText(updatedProfile.transcript_text || "");
+          
+          if (updatedProfile.transcript_text) {
+            alert(`Transcript uploaded! Extracted ${updatedProfile.transcript_text.length.toLocaleString()} characters for AI coaching.`);
+          } else {
+            alert("Transcript uploaded! Text extraction is processing...");
+          }
+        }
+        setUploadingTranscript(false);
+      }, 2000);
     } else {
       alert("Failed to upload transcript");
+      setUploadingTranscript(false);
     }
-    
-    setUploadingTranscript(false);
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -491,6 +521,62 @@ export default function ProfilePage() {
                     </svg>
                   </button>
                 )}
+              </div>
+            </div>
+            
+            {/* AI Coaching Status */}
+            <div className="mt-8 pt-8 border-t border-gray-200">
+              <div className="mb-4">
+                <h3 className="text-base font-semibold text-gray-900">AI Coaching Status</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Text is automatically extracted from your uploaded PDFs to enable personalized AI coaching.
+                </p>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                  <div className="flex items-center gap-3">
+                    <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Resume</p>
+                      {profile?.resume_url && <p className="text-xs text-gray-500">PDF uploaded</p>}
+                    </div>
+                  </div>
+                  {resumeText ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-green-600 font-medium">{resumeText.length.toLocaleString()} characters extracted</span>
+                      <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">No text extracted</span>
+                  )}
+                </div>
+                
+                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                  <div className="flex items-center gap-3">
+                    <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Transcript</p>
+                      {profile?.transcript_url && <p className="text-xs text-gray-500">PDF uploaded</p>}
+                    </div>
+                  </div>
+                  {transcriptText ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-green-600 font-medium">{transcriptText.length.toLocaleString()} characters extracted</span>
+                      <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">No text extracted</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

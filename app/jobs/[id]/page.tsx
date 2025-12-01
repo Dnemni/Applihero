@@ -14,6 +14,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [userId, setUserId] = useState<string>("");
 
   useEffect(() => {
     checkAuthAndLoadJob();
@@ -28,6 +29,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
       setTimeout(() => router.push("/login"), 1500);
       return;
     }
+
+    // Store user ID for chat
+    setUserId(user.id);
 
     // Load job data
     await loadJob();
@@ -203,6 +207,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
             <div className={fullscreen === 'chat' ? 'flex-1' : 'flex-1'}>
               <ChatPanel
                 jobId={job.id}
+                userId={userId}
                 fullscreen={fullscreen === 'chat'}
                 onToggleFullscreen={() => setFullscreen(fullscreen === 'chat' ? null : 'chat')}
               />

@@ -93,7 +93,6 @@ export class JobService {
 
     const { data, error} = await supabase
       .from('jobs')
-      // @ts-expect-error - Supabase type inference issue
       .update(updates)
       .eq('id', jobId)
       .eq('user_id', user.id)
@@ -117,7 +116,6 @@ export class JobService {
 
     const { data, error } = await supabase
       .from('jobs')
-      // @ts-expect-error - Supabase type inference issue
       .update({ status })
       .eq('id', jobId)
       .eq('user_id', user.id);

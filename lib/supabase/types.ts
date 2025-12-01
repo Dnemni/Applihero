@@ -25,6 +25,8 @@ export interface Database {
           bio: string | null;
           resume_url: string | null;
           transcript_url: string | null;
+          resume_text: string | null;
+          transcript_text: string | null;
           email_notifications: boolean;
           marketing_emails: boolean;
           active: boolean;
@@ -37,8 +39,10 @@ export interface Database {
           last_name?: string | null;
           email: string;
           bio?: string | null;
-          resume_url?: string | null;
-          transcript_url?: string | null;
+          resume_url: string | null;
+          transcript_url: string | null;
+          resume_text: string | null;
+          transcript_text: string | null;
           email_notifications?: boolean;
           marketing_emails?: boolean;
           active?: boolean;
@@ -53,6 +57,8 @@ export interface Database {
           bio?: string | null;
           resume_url?: string | null;
           transcript_url?: string | null;
+          resume_text?: string | null;
+          transcript_text?: string | null;
           email_notifications?: boolean;
           marketing_emails?: boolean;
           active?: boolean;

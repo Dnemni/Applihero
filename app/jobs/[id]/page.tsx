@@ -165,9 +165,11 @@ export default function JobPage({ params }: { params: { id: string } }) {
         const updatedReferral = await JobService.getReferral(job.id);
         if (updatedReferral) {
           setReferral(updatedReferral);
+          setShowReferralModal(false);
+          alert("Referral updated successfully!");
+        } else {
+          alert("Referral updated, but failed to refresh data. Please try again.");
         }
-        setShowReferralModal(false);
-        alert("Referral updated successfully!");
       } else {
         alert("Failed to update referral");
       }

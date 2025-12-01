@@ -109,6 +109,8 @@ export interface Database {
           answer_text: string | null;
           status: QuestionStatus;
           order_index: number | null;
+          feedback_score: number | null;
+          feedback_notes: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -119,6 +121,8 @@ export interface Database {
           answer_text?: string | null;
           status?: QuestionStatus;
           order_index?: number | null;
+          feedback_score?: number | null;
+          feedback_notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -129,6 +133,8 @@ export interface Database {
           answer_text?: string | null;
           status?: QuestionStatus;
           order_index?: number | null;
+          feedback_score?: number | null;
+          feedback_notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };

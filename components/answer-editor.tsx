@@ -8,14 +8,18 @@ export type AnswerEditorPanelProps = {
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
   jobId?: string;
+  userId?: string;
   questions?: Array<{
     id: string;
     question_text: string;
     answer_text: string | null;
     status: QuestionStatus;
     order_index: number | null;
+    feedback_score?: number | null;
+    feedback_notes?: string | null;
   }>;
   onQuestionsChange?: () => void;
+  onFeedback?: (score: number | null, notes: string) => void;
 };
 
 type Question = {
@@ -47,8 +51,10 @@ export function AnswerEditorPanel({
   fullscreen = false, 
   onToggleFullscreen,
   jobId,
+  userId,
   questions: dbQuestions,
-  onQuestionsChange 
+  onQuestionsChange,
+  onFeedback
 }: AnswerEditorPanelProps) {
   // Convert database questions to local format
   const localQuestions: Question[] = dbQuestions?.map(q => ({
@@ -63,9 +69,11 @@ export function AnswerEditorPanel({
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const [generatingFeedback, setGeneratingFeedback] = useState(false);
   const questionsEndRef = useRef<HTMLDivElement>(null);
   const questionsContainerRef = useRef<HTMLDivElement>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Update local state when dbQuestions changes
   useEffect(() => {
@@ -97,8 +105,61 @@ export function AnswerEditorPanel({
     if (selected && dbQuestions) {
       const dbQuestion = dbQuestions.find(q => q.id === selected.id);
       setAnswer(dbQuestion?.answer_text || "");
+      setSaveState('saved');
     }
   }, [selected?.id]);
+
+  // Auto-save answer with debouncing
+  useEffect(() => {
+    if (!selected || !jobId) return;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Check if answer changed from saved version
+    const dbQuestion = dbQuestions?.find(q => q.id === selected.id);
+    const savedAnswer = dbQuestion?.answer_text || "";
+    
+    if (answer !== savedAnswer) {
+      setSaveState('unsaved');
+      
+      // Set new timeout to save after 1 second of no typing
+      saveTimeoutRef.current = setTimeout(async () => {
+        try {
+          setSaveState('saving');
+          await QuestionService.saveAnswer(selected.id, answer, "Draft");
+          setSaveState('saved');
+          
+          // Update local state without full reload
+          setQuestions(questions.map(q => 
+            q.id === selected.id ? { ...q, status: "Draft" } : q
+          ));
+          if (selected) {
+            setSelected({ ...selected, status: "Draft" });
+          }
+          
+          // Refresh questions data in parent to keep feedback in sync
+          if (onQuestionsChange) {
+            await onQuestionsChange();
+          }
+        } catch (error) {
+          console.error("Auto-save failed:", error);
+          setSaveState('unsaved');
+        }
+      }, 1000);
+    } else {
+      setSaveState('saved');
+    }
+
+    // Cleanup
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [answer, selected?.id, jobId]);
 
   const scrollToBottom = () => {
     if (questionsContainerRef.current) {
@@ -123,7 +184,6 @@ export function AnswerEditorPanel({
     }
 
     try {
-      setSaving(true);
       const nextOrder = questions.length;
       const newQuestion = await QuestionService.createQuestion(jobId, "", nextOrder);
       
@@ -142,8 +202,6 @@ export function AnswerEditorPanel({
       }
     } catch (error) {
       console.error("Failed to add question:", error);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -166,7 +224,6 @@ export function AnswerEditorPanel({
     }
 
     try {
-      setSaving(true);
       await QuestionService.updateQuestion(questionId, { question_text: editingText });
       
       // Update local state without reloading
@@ -179,8 +236,6 @@ export function AnswerEditorPanel({
       }
     } catch (error) {
       console.error("Failed to update question:", error);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -193,45 +248,71 @@ export function AnswerEditorPanel({
     setEditingText("");
   };
 
-  const handleSaveDraft = async () => {
-    if (!selected || !jobId) return;
-
-    try {
-      setSaving(true);
-      await QuestionService.saveAnswer(selected.id, answer, "Draft");
-      
-      // Update local state without reloading
-      setQuestions(questions.map(q => 
-        q.id === selected.id ? { ...q, status: "Draft" } : q
-      ));
-      if (selected) {
-        setSelected({ ...selected, status: "Draft" });
-      }
-    } catch (error) {
-      console.error("Failed to save draft:", error);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleRequestFeedback = async () => {
     if (!selected || !jobId) return;
 
+    if (!answer || answer.trim().length === 0) {
+      alert("Please write an answer before requesting feedback.");
+      return;
+    }
+
     try {
-      setSaving(true);
-      await QuestionService.saveAnswer(selected.id, answer, "Final");
+      // Open modal immediately with loading state
+      setGeneratingFeedback(true);
+      if (onFeedback) {
+        onFeedback(null, ""); // Open modal with null score to show loading
+      }
       
-      // Update local state without reloading
-      setQuestions(questions.map(q => 
-        q.id === selected.id ? { ...q, status: "Final" } : q
-      ));
-      if (selected) {
-        setSelected({ ...selected, status: "Final" });
+      // First save the answer
+      await QuestionService.saveAnswer(selected.id, answer, "Draft");
+      
+      // Then generate feedback
+      const response = await fetch(`/api/questions/${selected.id}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId,
+          jobId 
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (onFeedback) {
+          onFeedback(data.score ?? null, data.feedback ?? "");
+        }
+        // Refresh questions so Review Feedback works immediately
+        if (onQuestionsChange) {
+          await onQuestionsChange();
+        }
+      } else {
+        alert("Failed to generate feedback. Please try again.");
       }
     } catch (error) {
       console.error("Failed to request feedback:", error);
+      alert("Failed to generate feedback. Please try again.");
     } finally {
-      setSaving(false);
+      setGeneratingFeedback(false);
+    }
+  };
+
+  const handleReviewFeedback = async () => {
+    if (!selected || !jobId) return;
+
+    try {
+      // Fetch existing feedback from database
+      const dbQuestion = dbQuestions?.find(q => q.id === selected.id);
+      
+      if (dbQuestion && dbQuestion.feedback_notes) {
+        if (onFeedback) {
+          onFeedback(dbQuestion.feedback_score || null, dbQuestion.feedback_notes || "");
+        }
+      } else {
+        alert("No feedback available yet. Click 'Request feedback' first.");
+      }
+    } catch (error) {
+      console.error("Failed to load feedback:", error);
+      alert("Failed to load feedback.");
     }
   };
 
@@ -249,7 +330,6 @@ export function AnswerEditorPanel({
     }
 
     try {
-      setSaving(true);
       await QuestionService.deleteQuestion(questionId);
       
       // Update local state without reloading
@@ -262,8 +342,6 @@ export function AnswerEditorPanel({
       }
     } catch (error) {
       console.error("Failed to delete question:", error);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -428,13 +506,39 @@ export function AnswerEditorPanel({
         <div className="flex flex-1 flex-col p-6 bg-white/80 rounded-r-3xl">
           {selected ? (
             <>
-              <div className="mb-4">
-                <label className="block text-base font-bold text-gray-900">
-                  {selected.text}
-                </label>
-                <p className="mt-1 text-xs text-gray-600">
-                  Draft your answer here. Later you can send it for feedback.
-                </p>
+              <div className="mb-4 flex items-start justify-between">
+                <div className="flex-1">
+                  <label className="block text-base font-bold text-gray-900">
+                    {selected.text}
+                  </label>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Draft your answer here. Later you can send it for feedback.
+                  </p>
+                </div>
+                {jobId && (
+                  <div className="flex items-center gap-1.5 ml-4 flex-shrink-0">
+                    {saveState === 'saving' && (
+                      <div className="flex items-center gap-1.5 text-xs text-blue-600">
+                        <div className="animate-spin h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                        <span className="font-medium">Saving</span>
+                      </div>
+                    )}
+                    {saveState === 'saved' && (
+                      <div className="flex items-center gap-1 text-xs text-gray-400">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span>Saved</span>
+                      </div>
+                    )}
+                    {saveState === 'unsaved' && (
+                      <div className="flex items-center gap-1 text-xs text-gray-400">
+                        <div className="h-1.5 w-1.5 rounded-full bg-gray-400"></div>
+                        <span>Unsaved</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <textarea
                 rows={10}
@@ -452,24 +556,24 @@ export function AnswerEditorPanel({
                 </div>
                 <div className="flex gap-2">
                   <button 
-                    onClick={handleSaveDraft}
-                    disabled={saving || !jobId}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleReviewFeedback}
+                    disabled={!jobId}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                     </svg>
-                    {saving ? "Saving..." : "Save draft"}
+                    Review Feedback
                   </button>
                   <button 
                     onClick={handleRequestFeedback}
-                    disabled={saving || !jobId}
+                    disabled={!jobId}
                     className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-500 to-pink-400 px-4 py-2 text-sm font-semibold text-white hover:from-purple-600 hover:to-pink-500 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                     </svg>
-                    {saving ? "Saving..." : "Request feedback"}
+                    Request Feedback
                   </button>
                 </div>
               </div>
@@ -488,6 +592,8 @@ export function AnswerEditorPanel({
           )}
         </div>
       </div>
+
+      {/* Feedback Modal is rendered by parent page to cover full screen */}
     </div>
   );
 }

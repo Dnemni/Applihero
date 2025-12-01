@@ -17,6 +17,10 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [userId, setUserId] = useState<string>("");
   const [showDescriptionModal, setShowDescriptionModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackScore, setFeedbackScore] = useState<number | null>(null);
+  const [feedbackNotes, setFeedbackNotes] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [editForm, setEditForm] = useState({ jobTitle: "", companyName: "", jobDescription: "" });
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -43,7 +47,12 @@ export default function JobPage({ params }: { params: { id: string } }) {
   }
 
   async function loadJob() {
-    setLoading(true);
+    // Only show loading spinner on initial load, not on refreshes
+    const isInitialLoad = !job;
+    if (isInitialLoad) {
+      setLoading(true);
+    }
+    
     const jobData = await JobService.getJobById(params.id);
     
     if (!jobData) {
@@ -53,7 +62,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
     }
 
     setJob(jobData);
-    setLoading(false);
+    if (isInitialLoad) {
+      setLoading(false);
+    }
   }
 
   async function handleSubmitApplication() {
@@ -340,11 +351,111 @@ export default function JobPage({ params }: { params: { id: string } }) {
             <div className={fullscreen === 'answer' ? 'flex-1' : 'flex-1'}>
               <AnswerEditorPanel
                 jobId={job.id}
+                userId={userId}
                 questions={job.questions || []}
                 onQuestionsChange={loadJob}
                 fullscreen={fullscreen === 'answer'}
                 onToggleFullscreen={() => setFullscreen(fullscreen === 'answer' ? null : 'answer')}
+                onFeedback={(score, notes) => {
+                  if (score === null && notes === "") {
+                    // Loading state - open modal with spinner
+                    setFeedbackLoading(true);
+                    setFeedbackScore(null);
+                    setFeedbackNotes("");
+                    setShowFeedbackModal(true);
+                  } else {
+                    // Feedback received - update modal content and open it
+                    setFeedbackLoading(false);
+                    setFeedbackScore(score);
+                    setFeedbackNotes(notes);
+                    setShowFeedbackModal(true);
+                  }
+                }}
               />
+                  {showFeedbackModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowFeedbackModal(false)}>
+                      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-500 to-pink-400">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h2 className="text-xl font-bold text-white">Answer Feedback</h2>
+                              <p className="text-sm text-purple-100 mt-1">AI-powered review of your answer</p>
+                            </div>
+                            <button 
+                              onClick={() => setShowFeedbackModal(false)} 
+                              className="text-white/80 hover:text-white transition-colors"
+                            >
+                              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="p-6 overflow-y-auto max-h-[calc(80vh-200px)]">
+                          {feedbackLoading ? (
+                            <div className="flex flex-col items-center justify-center py-12">
+                              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+                              <p className="text-gray-600 font-medium">Analyzing your answer...</p>
+                              <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
+                            </div>
+                          ) : feedbackScore !== null && (
+                            <div className="flex items-center gap-4 mb-6">
+                              <div className="flex-shrink-0">
+                                <div className="relative h-20 w-20">
+                                  <svg className="transform -rotate-90" width="80" height="80">
+                                    <circle cx="40" cy="40" r="32" stroke="#e5e7eb" strokeWidth="8" fill="none" />
+                                    <circle cx="40" cy="40" r="32" stroke="url(#gradient)" strokeWidth="8" fill="none" strokeDasharray={`${(feedbackScore / 10) * 201} 201`} strokeLinecap="round" />
+                                    <defs>
+                                      <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stopColor="#a855f7" />
+                                        <stop offset="100%" stopColor="#ec4899" />
+                                      </linearGradient>
+                                    </defs>
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-2xl font-bold text-gray-900">{feedbackScore}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex-1">
+                                <h3 className="text-lg font-bold text-gray-900">Score: {feedbackScore}/10</h3>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  {feedbackScore >= 8 ? "Excellent work! Your answer is strong." :
+                                   feedbackScore >= 6 ? "Good answer with room for improvement." :
+                                   feedbackScore >= 4 ? "Decent start, but needs significant work." :
+                                   "This answer needs major revisions."}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+              
+                          {feedbackNotes && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-3">Detailed Feedback:</h4>
+                              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-100">
+                                <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+                                  {feedbackNotes}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {!feedbackLoading && (
+                          <div className="p-6 border-t border-gray-200 flex justify-between items-center bg-gray-50">
+                            <p className="text-xs text-gray-500">
+                              💡 Use this feedback to improve your answer, then request new feedback to see your progress.
+                            </p>
+                            <button
+                              onClick={() => setShowFeedbackModal(false)}
+                              className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-400 rounded-lg hover:from-purple-600 hover:to-pink-500 transition-colors"
+                            >
+                              Got it!
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
             </div>
           )}
         </div>

@@ -40,6 +40,11 @@ export default function ProfilePage() {
   // New onboarding system
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  
+  // Delete account
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -349,16 +354,49 @@ export default function ProfilePage() {
   }
 
   async function handleDeleteAccount() {
-    if (!confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
+    setShowDeleteModal(true);
+  }
+
+  async function confirmDeleteAccount() {
+    if (!deletePassword.trim()) {
+      alert("Please enter your password to confirm deletion");
       return;
     }
 
-    const success = await ProfileService.deactivateAccount();
+    setDeleting(true);
+    
+    try {
+      // First verify password by attempting to sign in
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: deletePassword,
+      });
 
-    if (success) {
-      router.push("/login");
-    } else {
-      alert("Failed to delete account");
+      if (authError) {
+        alert("Incorrect password. Please try again.");
+        setDeleting(false);
+        return;
+      }
+
+      // Password verified, proceed with deletion via API
+      const response = await fetch('/api/profile/delete-account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (response.ok) {
+        // Sign out and redirect to home
+        await supabase.auth.signOut();
+        router.push("/");
+      } else {
+        const errorData = await response.json();
+        alert(`Failed to delete account: ${errorData.error || 'Unknown error'}`);
+        setDeleting(false);
+      }
+    } catch (err) {
+      console.error('Delete account error:', err);
+      alert("An error occurred while deleting your account");
+      setDeleting(false);
     }
   }
 
@@ -757,6 +795,79 @@ export default function ProfilePage() {
           onComplete={handleOnboardingComplete}
           showProgress={true}
         />
+      )}
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !deleting && setShowDeleteModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Delete Account</h2>
+                  <p className="text-sm text-gray-600 mt-1">This action cannot be undone</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm text-red-800 font-medium mb-2">⚠️ Warning: This will permanently delete:</p>
+                <ul className="text-sm text-red-700 space-y-1 ml-4 list-disc">
+                  <li>Your profile and personal information</li>
+                  <li>All job applications and related data</li>
+                  <li>Chat history and AI coaching sessions</li>
+                  <li>Uploaded documents (resume, transcript)</li>
+                  <li>All answers and cover letters</li>
+                </ul>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Enter your password to confirm deletion:
+                </label>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  disabled={deleting}
+                  placeholder="Your password"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !deleting) {
+                      confirmDeleteAccount();
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex gap-3 justify-end bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeletePassword("");
+                }}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteAccount}
+                disabled={deleting || !deletePassword.trim()}
+                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {deleting && (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                )}
+                {deleting ? "Deleting..." : "Delete My Account"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

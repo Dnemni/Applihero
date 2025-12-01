@@ -4,6 +4,7 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
+import { initializeOnboarding } from "@/lib/onboarding-state";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -72,20 +73,10 @@ export default function SignupPage() {
         }
 
         setSuccess(true);
-        // Check onboarding status and redirect accordingly
+        // Initialize onboarding and redirect to profile
         setTimeout(() => {
-          (async () => {
-            try {
-              const profile = await ProfileService.getCurrentProfile();
-              if (profile && !profile.onboarding_completed) {
-                router.push("/profile");
-              } else {
-                router.push("/dashboard");
-              }
-            } catch (err) {
-              console.error("Error fetching profile or redirecting:", err);
-            }
-          })();
+          initializeOnboarding();
+          router.push("/profile");
         }, 2000);
       }
     } catch (err: any) {

@@ -4,6 +4,14 @@ import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { JobService } from "@/lib/supabase/services";
+import { OnboardingOverlay } from "@/components/onboarding-overlay";
+import type { OnboardingStep } from "@/components/onboarding-overlay";
+import { 
+  getOnboardingState, 
+  setOnboardingState,
+  advanceOnboarding, 
+  shouldShowOnboarding 
+} from "@/lib/onboarding-state";
 
 export default function NewJobPage() {
   const router = useRouter();
@@ -18,9 +26,55 @@ export default function NewJobPage() {
   const [referralTitle, setReferralTitle] = useState("");
   const [referralLinkedIn, setReferralLinkedIn] = useState("");
   const [referralRelation, setReferralRelation] = useState("");
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      title: "Create Your First Job Application 🚀",
+      description: "This is where you'll add a new job you're applying to. Fill out the job details and Applihero will analyze everything to help you craft personalized answers. Let's get started!",
+      position: "center",
+    },
+    {
+      title: "Job Title",
+      description: "Click the highlighted field and enter the position title you're applying for (e.g., 'Software Engineer'). This helps the AI understand the role.",
+      targetId: "job-title-input",
+      position: "bottom",
+    },
+    {
+      title: "Company Name",
+      description: "Enter the company name here. The AI will use this to provide company-specific insights when coaching you.",
+      targetId: "company-input",
+      position: "bottom",
+    },
+    {
+      title: "Job Description",
+      description: "Paste the full job description here. The AI will analyze it to understand what skills and experience the company is looking for. This is key to getting personalized guidance!",
+      targetId: "description-input",
+      position: "top",
+    },
+    {
+      title: "Referral Info (Optional)",
+      description: "If you have a referral, you can add their information here. This is optional but helps track your connections. Feel free to skip this for now.",
+      targetId: "referral-section",
+      position: "left",
+    },
+    {
+      title: "Submit Your Application",
+      description: "Ready to go? Click the highlighted 'Create job session' button! The AI will analyze everything and take you to your personalized coaching workspace.",
+      targetId: "submit-button",
+      position: "top",
+    },
+  ];
 
   useEffect(() => {
     checkAuth();
+    
+    // Check if we should show job-creation onboarding
+    if (shouldShowOnboarding('job-creation')) {
+      setShowOnboarding(true);
+      setOnboardingStep(0);
+    }
   }, []);
 
   async function checkAuth() {
@@ -94,6 +148,17 @@ export default function NewJobPage() {
         }
       }
 
+      // Store job ID in onboarding state if onboarding is active
+      const state = getOnboardingState();
+      if (state && state.phase === 'job-creation') {
+        setOnboardingState({
+          ...state,
+          phase: 'job-detail',
+          step: 0,
+          jobId: newJob.id,
+        });
+      }
+
       // Navigate to the job page
       router.push(`/jobs/${newJob.id}`);
     } catch (error) {
@@ -106,6 +171,30 @@ export default function NewJobPage() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push("/login");
+  }
+
+  function handleOnboardingNext() {
+    if (onboardingStep < onboardingSteps.length - 1) {
+      setOnboardingStep(onboardingStep + 1);
+    }
+  }
+
+  function handleOnboardingPrevious() {
+    if (onboardingStep > 0) {
+      setOnboardingStep(onboardingStep - 1);
+    }
+  }
+
+  function handleOnboardingSkip() {
+    setShowOnboarding(false);
+    // Advance to job-detail phase
+    advanceOnboarding('job-creation', 'job-detail');
+  }
+
+  function handleOnboardingComplete() {
+    setShowOnboarding(false);
+    // Advance to job-detail phase
+    advanceOnboarding('job-creation', 'job-detail');
   }
 
   if (redirecting) {
@@ -182,6 +271,7 @@ export default function NewJobPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Job title *</label>
                 <input
+                  id="job-title-input"
                   type="text"
                   value={jobTitle}
                   onChange={(e) => setJobTitle(e.target.value)}
@@ -192,7 +282,7 @@ export default function NewJobPage() {
                 />
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div id="referral-section" className="rounded-lg border border-gray-200 bg-white p-4">
                 <label className="block text-sm font-medium text-gray-700 mb-3">Referral (optional)</label>
                 <div className="space-y-3">
                   <div>
@@ -256,6 +346,7 @@ export default function NewJobPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Company *</label>
               <input
+                id="company-input"
                 type="text"
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
@@ -268,6 +359,7 @@ export default function NewJobPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Job description (optional)</label>
               <textarea
+                id="description-input"
                 rows={8}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -278,6 +370,7 @@ export default function NewJobPage() {
             </div>
             <div className="flex gap-3">
               <button
+                id="submit-button"
                 type="submit"
                 disabled={submitting}
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -294,6 +387,19 @@ export default function NewJobPage() {
           </form>
         </div>
       </div>
+
+      {/* Onboarding Overlay */}
+      {showOnboarding && (
+        <OnboardingOverlay
+          steps={onboardingSteps}
+          currentStep={onboardingStep}
+          onNext={handleOnboardingNext}
+          onPrevious={handleOnboardingPrevious}
+          onSkip={handleOnboardingSkip}
+          onComplete={handleOnboardingComplete}
+          showProgress={true}
+        />
+      )}
     </div>
   );
 }

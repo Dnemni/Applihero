@@ -383,6 +383,7 @@ export function AnswerEditorPanel({
                 {questions.length}
               </span>
               <button
+                id="add-question-button"
                 onClick={handleAddQuestion}
                 className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-400 text-white hover:from-purple-600 hover:to-pink-500 transition-all shadow-sm"
                 title="Add question"

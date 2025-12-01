@@ -2,10 +2,18 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
-import { JobService } from "@/lib/supabase/services";
+import { JobService, ProfileService } from "@/lib/supabase/services";
 import type { JobWithQuestions } from "@/lib/supabase/types";
 import { ChatPanel } from "../../../components/chat";
 import { AnswerEditorPanel } from "../../../components/answer-editor";
+import { OnboardingOverlay } from "@/components/onboarding-overlay";
+import type { OnboardingStep } from "@/components/onboarding-overlay";
+import { 
+  getOnboardingState, 
+  setOnboardingState,
+  shouldShowOnboarding,
+  clearOnboardingState
+} from "@/lib/onboarding-state";
 
 export default function JobPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -22,14 +30,71 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [feedbackNotes, setFeedbackNotes] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [editForm, setEditForm] = useState({ jobTitle: "", companyName: "", jobDescription: "" });
-  const [referralForm, setReferralForm] = useState({ linkedin_url: "", relation: "" });
+  const [referralForm, setReferralForm] = useState({ 
+    person_name: "", 
+    company: "", 
+    title: "", 
+    linkedin_url: "", 
+    relation: "" 
+  });
   const [referral, setReferral] = useState<any | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updatingReferral, setUpdatingReferral] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      title: "Welcome to Your Job Workspace! 🎯",
+      description: "This is where the magic happens! You'll use AI coaching to prepare your application answers, get feedback, and iterate until they're perfect. Let's explore the workspace!",
+      position: "center",
+    },
+    {
+      title: "Chat with Your AI Coach 💬",
+      description: "This is your AI coach panel. You can ask questions about the job, get advice on how to approach questions, or discuss strategy. The AI has read your resume and the job description! Try clicking it to explore.",
+      targetId: "chat-panel",
+      position: "right",
+    },
+    {
+      title: "Application Questions Panel 📝",
+      description: "Here's where you'll manage your application questions and answers. You can add questions from the job portal, draft responses, and request AI feedback. Click here to see the interface.",
+      targetId: "questions-panel",
+      position: "left",
+    },
+    {
+      title: "Add New Questions ➕",
+      description: "See that '+' button? Click it to add application questions from the job portal. Paste the question text and the AI will help you craft a personalized, compelling answer!",
+      targetId: "add-question-button",
+      position: "left",
+    },
+    {
+      title: "Draft Your Answers ✍️",
+      description: "Once you add a question, click on it to draft your answer. Type naturally - the AI will help you refine and improve your response through the chat.",
+      targetId: "questions-panel",
+      position: "left",
+    },
+    {
+      title: "Request AI Feedback 🎓",
+      description: "After drafting an answer, you can request AI feedback! You'll get a score (1-10) and detailed suggestions on how to improve. Keep iterating until you're satisfied!",
+      targetId: "questions-panel",
+      position: "left",
+    },
+    {
+      title: "You're All Set! 🎉",
+      description: "Congratulations! You now know how to use Applihero. Add questions, draft answers, chat with the AI for help, request feedback, and iterate. When ready, click 'Submit Application' at the top. You've got this! 🚀",
+      position: "center",
+    },
+  ];
 
   useEffect(() => {
     checkAuthAndLoadJob();
+    
+    // Check if we should show job-detail onboarding
+    if (shouldShowOnboarding('job-detail')) {
+      setShowOnboarding(true);
+      setOnboardingStep(0);
+    }
   }, [params.id]);
 
   async function checkAuthAndLoadJob() {
@@ -72,6 +137,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
       if (referralData) {
         setReferral(referralData);
         setReferralForm({
+          person_name: referralData.person_name || "",
+          company: referralData.company || "",
+          title: referralData.title || "",
           linkedin_url: referralData.linkedin_url || "",
           relation: referralData.relation || "",
         });
@@ -178,6 +246,47 @@ export default function JobPage({ params }: { params: { id: string } }) {
       alert("Failed to update referral");
     }
     setUpdatingReferral(false);
+  }
+
+  function handleOnboardingNext() {
+    if (onboardingStep < onboardingSteps.length - 1) {
+      setOnboardingStep(onboardingStep + 1);
+    }
+  }
+
+  function handleOnboardingPrevious() {
+    if (onboardingStep > 0) {
+      setOnboardingStep(onboardingStep - 1);
+    }
+  }
+
+  function handleOnboardingSkip() {
+    setShowOnboarding(false);
+    // Complete onboarding and mark user as fully onboarded
+    completeFullOnboarding();
+  }
+
+  async function handleOnboardingComplete() {
+    setShowOnboarding(false);
+    // Complete onboarding and mark user as fully onboarded
+    await completeFullOnboarding();
+  }
+
+  async function completeFullOnboarding() {
+    // Clear onboarding state
+    clearOnboardingState();
+    
+    // Mark onboarding as completed in the database
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await ProfileService.updateProfile({
+          onboarding_completed: true,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to update onboarding status:", error);
+    }
   }
 
   async function handleDelete() {
@@ -363,7 +472,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
               </div>
             </button>
           ) : (
-            <div className={fullscreen === 'chat' ? 'flex-1' : 'flex-1'}>
+            <div id="chat-panel" className={fullscreen === 'chat' ? 'flex-1' : 'flex-1'}>
               <ChatPanel
                 jobId={job.id}
                 userId={userId}
@@ -396,7 +505,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
               </div>
             </button>
           ) : (
-            <div className={fullscreen === 'answer' ? 'flex-1' : 'flex-1'}>
+            <div id="questions-panel" className={fullscreen === 'answer' ? 'flex-1' : 'flex-1'}>
               <AnswerEditorPanel
                 jobId={job.id}
                 userId={userId}
@@ -673,6 +782,19 @@ export default function JobPage({ params }: { params: { id: string } }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Onboarding Overlay */}
+      {showOnboarding && (
+        <OnboardingOverlay
+          steps={onboardingSteps}
+          currentStep={onboardingStep}
+          onNext={handleOnboardingNext}
+          onPrevious={handleOnboardingPrevious}
+          onSkip={handleOnboardingSkip}
+          onComplete={handleOnboardingComplete}
+          showProgress={true}
+        />
       )}
     </div>
   );

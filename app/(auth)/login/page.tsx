@@ -4,6 +4,7 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
+import { initializeOnboarding } from "@/lib/onboarding-state";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function LoginPage() {
         // Check onboarding status
         const profile = await ProfileService.getCurrentProfile();
         if (profile && !profile.onboarding_completed) {
+          initializeOnboarding();
           router.push("/profile");
         } else {
           router.push("/dashboard");

@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
 import type { Profile } from "@/lib/supabase/types";
+import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overlay";
+import {
+  getOnboardingState,
+  setOnboardingState,
+  advanceOnboarding,
+  shouldShowOnboarding,
+} from "@/lib/onboarding-state";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -29,10 +36,10 @@ export default function ProfilePage() {
   const [uploadedTranscript, setUploadedTranscript] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptInputRef = useRef<HTMLInputElement>(null);
-  const [showOnboardingDialog, setShowOnboardingDialog] = useState(false);
+  
+  // New onboarding system
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const resumeSectionRef = useRef<HTMLDivElement>(null);
-  const transcriptSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProfile();
@@ -85,9 +92,10 @@ export default function ProfilePage() {
       setMarketingEmails(data.marketing_emails);
 
       // Check if onboarding is needed
-      if (!data.onboarding_completed) {
-        setShowOnboardingDialog(true);
-        setOnboardingStep(0);
+      if (!data.onboarding_completed && shouldShowOnboarding("profile")) {
+        setShowOnboarding(true);
+        const state = getOnboardingState();
+        setOnboardingStep(state?.step || 0);
       }
     }
 
@@ -106,12 +114,89 @@ export default function ProfilePage() {
     if (updated) {
       setProfile(updated);
       alert("Profile updated successfully!");
+      
+      // Auto-complete profile onboarding if on the last step
+      if (showOnboarding && onboardingStep === 4) {
+        setTimeout(() => handleOnboardingComplete(), 800);
+      }
     } else {
       alert("Failed to update profile");
     }
 
     setSaving(false);
   }
+
+  // Onboarding handlers
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      title: "Welcome to Applihero! 🎉",
+      description: "Let's set up your profile to enable personalized AI coaching. We'll help you upload your resume, transcript, and add a bio. This should only take a few minutes!",
+      position: "center",
+    },
+    {
+      title: "Upload Your Resume 📄",
+      description: "Click the highlighted area to upload your resume (PDF). Applihero will extract your skills, experience, and education to provide personalized coaching. The tutorial will advance automatically once uploaded!",
+      targetId: "resume-upload-section",
+      position: "right",
+    },
+    {
+      title: "Upload Your Transcript 📚",
+      description: "Now click here to upload your academic transcript (PDF). This helps the AI understand your educational background. The tutorial will continue automatically after upload.",
+      targetId: "transcript-upload-section",
+      position: "right",
+    },
+    {
+      title: "Add Your Bio ✍️",
+      description: "Click in the bio field and write a brief description about yourself. Include your interests, goals, and what makes you unique. Don't worry, you can edit this anytime!",
+      targetId: "bio-section",
+      position: "right",
+    },
+    {
+      title: "Save Your Profile 💾",
+      description: "Perfect! Now click the 'Save Profile' button below to save your changes. The tutorial will automatically take you to the dashboard next!",
+      targetId: "save-profile-button",
+      position: "bottom",
+    },
+  ];
+
+  const handleOnboardingNext = () => {
+    const state = getOnboardingState();
+    if (!state) return;
+
+    const newState = {
+      ...state,
+      step: onboardingStep + 1,
+    };
+    setOnboardingState(newState);
+    setOnboardingStep(onboardingStep + 1);
+  };
+
+  const handleOnboardingPrevious = () => {
+    const state = getOnboardingState();
+    if (!state) return;
+
+    const newState = {
+      ...state,
+      step: Math.max(0, onboardingStep - 1),
+    };
+    setOnboardingState(newState);
+    setOnboardingStep(Math.max(0, onboardingStep - 1));
+  };
+
+  const handleOnboardingSkip = async () => {
+    // Mark onboarding complete in DB and clear state
+    await ProfileService.updateProfile({ onboarding_completed: true });
+    advanceOnboarding("profile", "completed");
+    setShowOnboarding(false);
+    router.push("/dashboard");
+  };
+
+  const handleOnboardingComplete = async () => {
+    // Advance to dashboard phase
+    advanceOnboarding("profile", "dashboard");
+    setShowOnboarding(false);
+    router.push("/dashboard");
+  };
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -130,11 +215,6 @@ export default function ProfilePage() {
     if (url) {
       setUploadedFile(file);
 
-      // Advance onboarding if in progress
-      if (showOnboardingDialog && onboardingStep === 0) {
-        setOnboardingStep(1);
-      }
-
       // Wait a moment for text extraction to complete
       setTimeout(async () => {
         const updatedProfile = await ProfileService.getCurrentProfile();
@@ -146,6 +226,11 @@ export default function ProfilePage() {
             alert(`Resume uploaded! Extracted ${updatedProfile.resume_text.length.toLocaleString()} characters for AI coaching.`);
           } else {
             alert("Resume uploaded! Text extraction is processing...");
+          }
+          
+          // Auto-advance onboarding if on resume step
+          if (showOnboarding && onboardingStep === 1) {
+            setTimeout(() => handleOnboardingNext(), 500);
           }
         }
         setUploading(false);
@@ -168,11 +253,6 @@ export default function ProfilePage() {
     if (url) {
       setUploadedTranscript(file);
 
-      // Complete onboarding if in progress (after transcript upload)
-      if (showOnboardingDialog) {
-        await completeOnboarding();
-      }
-
       // Wait a moment for text extraction to complete
       setTimeout(async () => {
         const updatedProfile = await ProfileService.getCurrentProfile();
@@ -185,39 +265,17 @@ export default function ProfilePage() {
           } else {
             alert("Transcript uploaded! Text extraction is processing...");
           }
+          
+          // Auto-advance onboarding if on transcript step
+          if (showOnboarding && onboardingStep === 2) {
+            setTimeout(() => handleOnboardingNext(), 500);
+          }
         }
         setUploadingTranscript(false);
       }, 2000);
     } else {
       alert("Failed to upload transcript");
       setUploadingTranscript(false);
-    }
-  }
-
-  async function completeOnboarding() {
-    const updated = await ProfileService.updateProfile({
-      onboarding_completed: true,
-    });
-
-    if (updated) {
-      setShowOnboardingDialog(false);
-      router.push("/dashboard?onboarding=completed");
-    }
-  }
-
-  function handleSkipOnboarding() {
-    completeOnboarding();
-  }
-
-  function handleNextOnboardingStep() {
-    if (onboardingStep === 0) {
-      // Scroll to resume section
-      resumeSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setOnboardingStep(1);
-    } else if (onboardingStep === 1) {
-      // Scroll to transcript section
-      transcriptSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setOnboardingStep(2);
     }
   }
 
@@ -421,7 +479,7 @@ export default function ProfilePage() {
                 />
                 <p className="mt-1 text-xs text-gray-500">Email cannot be changed</p>
               </div>
-              <div className="md:col-span-2">
+              <div id="bio-section" className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700">Bio</label>
                 <textarea
                   rows={4}
@@ -443,6 +501,7 @@ export default function ProfilePage() {
                 Cancel
               </button>
               <button
+                id="save-profile-button"
                 onClick={handleSaveProfile}
                 disabled={saving}
                 className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white hover:from-indigo-700 hover:to-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
@@ -461,7 +520,7 @@ export default function ProfilePage() {
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               {/* Resume Upload */}
-              <div ref={resumeSectionRef}>
+              <div id="resume-upload-section">
                 <label className="block text-sm font-medium text-gray-700 mb-3">Resume</label>
                 <input
                   ref={fileInputRef}
@@ -517,7 +576,7 @@ export default function ProfilePage() {
               </div>
 
               {/* Transcript Upload */}
-              <div ref={transcriptSectionRef}>
+              <div id="transcript-upload-section">
                 <label className="block text-sm font-medium text-gray-700 mb-3">Transcript</label>
                 <input
                   ref={transcriptInputRef}
@@ -687,102 +746,17 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Onboarding Dialog */}
-      {showOnboardingDialog && (
-        <div className="fixed right-0 top-0 z-50 h-full w-full max-w-md p-6 pointer-events-none">
-          <div className="relative h-full flex items-center">
-            <div className="w-full rounded-2xl bg-white p-6 shadow-2xl border border-gray-200 pointer-events-auto">
-              {onboardingStep === 0 && (
-                <>
-                  <div className="mb-4">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume 📄</h2>
-                    <p className="text-sm text-gray-600">
-                      Upload your resume so Applihero can extract your skills, experience, and education to provide personalized coaching.
-                    </p>
-                  </div>
-                  <div className="mb-6">
-                    <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
-                      <p className="text-sm text-indigo-900 font-medium mb-2">💡 Why upload your resume?</p>
-                      <p className="text-xs text-indigo-700">
-                        Applihero will analyze your resume to understand your background and help you tailor your application answers to match your experience.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleNextOnboardingStep}
-                      className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-                    >
-                      Next
-                    </button>
-                    <button
-                      onClick={handleSkipOnboarding}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
-                    >
-                      Skip for now
-                    </button>
-                  </div>
-                </>
-              )}
-              {onboardingStep === 1 && (
-                <>
-                  <div className="mb-4">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Transcript 🎓</h2>
-                    <p className="text-sm text-gray-600">
-                      Upload your transcript to help Applihero understand your academic background and coursework.
-                    </p>
-                  </div>
-                  <div className="mb-6">
-                    <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
-                      <p className="text-sm text-indigo-900 font-medium mb-2">💡 Why upload your transcript?</p>
-                      <p className="text-xs text-indigo-700">
-                        Your transcript helps Applihero understand your academic achievements and can be used to highlight relevant coursework in your applications.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleNextOnboardingStep}
-                      className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-                    >
-                      Next
-                    </button>
-                    <button
-                      onClick={handleSkipOnboarding}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
-                    >
-                      Skip for now
-                    </button>
-                  </div>
-                </>
-              )}
-              {onboardingStep === 2 && (
-                <>
-                  <div className="mb-4">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">You're all set! 🎉</h2>
-                    <p className="text-sm text-gray-600">
-                      You can upload your resume and transcript anytime from your profile. Let's get started with your first job application!
-                    </p>
-                  </div>
-                  <div className="mb-6">
-                    <div className="rounded-lg bg-green-50 p-4 border border-green-200">
-                      <p className="text-sm text-green-900 font-medium mb-2">✨ Ready to go!</p>
-                      <p className="text-xs text-green-700">
-                        Head back to the dashboard to create your first job application and start getting personalized coaching.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleSkipOnboarding}
-                    className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-                  >
-                    Complete Tutorial
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* New Onboarding Overlay */}
+      {showOnboarding && (
+        <OnboardingOverlay
+          steps={onboardingSteps}
+          currentStep={onboardingStep}
+          onNext={handleOnboardingNext}
+          onPrevious={handleOnboardingPrevious}
+          onSkip={handleOnboardingSkip}
+          onComplete={handleOnboardingComplete}
+          showProgress={true}
+        />
       )}
     </div>
   );

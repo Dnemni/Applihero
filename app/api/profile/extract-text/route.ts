@@ -10,6 +10,17 @@ import { supabaseAdmin } from "@/lib/supabase/client";
  */
 export async function POST(req: NextRequest) {
   try {
+    // Polyfill DOM APIs needed by pdf.js in Node
+    try {
+      const canvasMod = await import('@napi-rs/canvas');
+      const g: any = global as any;
+      g.DOMMatrix = g.DOMMatrix || (canvasMod as any).DOMMatrix;
+      g.ImageData = g.ImageData || (canvasMod as any).ImageData;
+      g.Path2D = g.Path2D || (canvasMod as any).Path2D;
+    } catch (polyErr) {
+      // If polyfills fail, continue — pdf-parse may still work
+      console.warn('Canvas polyfills unavailable:', polyErr);
+    }
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const userId = formData.get('userId') as string;

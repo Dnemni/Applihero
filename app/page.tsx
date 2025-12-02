@@ -325,7 +325,7 @@ const response = await openai.create({
             <div className="max-w-4xl mx-auto">
               <div className="text-center mb-12">
                 <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 mb-6">
-                  <img src="/applihero.png" alt="Applihero Logo" className="w-16 h-16" />
+                  <img src="/applihero_none.png" alt="Applihero Logo" className="w-16 h-16" />
                 </div>
                 <h2 className="text-3xl font-bold text-gray-900 mb-4">
                   Powered by Retrieval Augmented Generation (RAG)

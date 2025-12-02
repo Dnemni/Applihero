@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       .select("*")
       .eq("id", jobId)
       .eq("user_id", userId)
-      .single();
+      .single() as { data: any; error: any };
 
     if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       .from("profiles")
       .select("*")
       .eq("id", userId)
-      .single();
+      .single() as { data: any; error: any };
 
     // Generate templates using RAG
     console.log('[Cover Letter Templates] Generating for:', { jobTitle: job.job_title, company: job.company_name, templateStyle, settings });

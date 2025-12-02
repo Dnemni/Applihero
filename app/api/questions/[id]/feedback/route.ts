@@ -39,7 +39,7 @@ export async function POST(
       query: `${question.question_text} ${question.answer_text}`,
       userId,
       jobId,
-      topK: 5,
+      matchCount: 5,
     });
 
     const context = contextChunks.map(c => c.content).join("\n---\n");

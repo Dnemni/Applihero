@@ -5,6 +5,7 @@ import { resolve } from 'path';
 config({ path: resolve(process.cwd(), '.env.local') });
 
 import { supabaseAdmin } from '../lib/supabase/client';
+import { ChatMessage } from '../lib/supabase/types';
 
 async function checkChatMessages() {
   const jobSessionId = '1e77fa12-4cae-480f-9b26-f84f1c0ace78';
@@ -22,7 +23,7 @@ async function checkChatMessages() {
   }
   
   console.log(`\nFound ${data.length} recent messages for job session ${jobSessionId}:\n`);
-  data.forEach((msg, i) => {
+  data.forEach((msg: ChatMessage, i: number) => {
     console.log(`${i + 1}. [${msg.role}] ${msg.content.substring(0, 80)}...`);
     console.log(`   Created: ${new Date(msg.created_at).toLocaleString()}\n`);
   });

@@ -8,6 +8,8 @@ import { ChatPanel } from "../../../components/chat";
 import { AnswerEditorPanel } from "../../../components/answer-editor";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { CoverLetterModal } from "@/components/cover-letter-modal";
+import { toast } from "@/components/toast";
+import { useConfirmation } from "@/components/confirmation-dialog";
 import type { OnboardingStep } from "@/components/onboarding-overlay";
 import { 
   getOnboardingState, 
@@ -18,6 +20,7 @@ import {
 
 export default function JobPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const { confirm, dialog } = useConfirmation();
   const [fullscreen, setFullscreen] = useState<null | 'chat' | 'answer'>(null);
   const [job, setJob] = useState<JobWithQuestions | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,8 +86,20 @@ export default function JobPage({ params }: { params: { id: string } }) {
       position: "left",
     },
     {
+      title: "Generate Cover Letters 📄",
+      description: "Need a cover letter? Click this button to generate personalized cover letters using AI. It will reference your resume and the job description to create compelling letters!",
+      targetId: "cover-letter-button",
+      position: "bottom",
+    },
+    {
+      title: "Add Referral Information 🤝",
+      description: "Have a referral? Click here to save referral details. This helps you track connections and mention them in your application materials!",
+      targetId: "referral-button",
+      position: "bottom",
+    },
+    {
       title: "You're All Set! 🎉",
-      description: "Congratulations! You now know how to use Applihero. Add questions, draft answers, chat with the AI for help, request feedback, and iterate. When ready, click 'Submit Application' at the top. You've got this! 🚀",
+      description: "Congratulations! You now know how to use Applihero. Add questions, draft answers, generate cover letters, add referrals, chat with the AI for help, request feedback, and iterate. When ready, click 'Submit Application' at the top. You've got this! 🚀",
       position: "center",
     },
   ];
@@ -93,10 +108,12 @@ export default function JobPage({ params }: { params: { id: string } }) {
     checkAuthAndLoadJob();
     
     // Check if we should show job-detail onboarding
-    if (shouldShowOnboarding('job-detail')) {
-      setShowOnboarding(true);
-      setOnboardingStep(0);
-    }
+    shouldShowOnboarding('job-detail').then(should => {
+      if (should) {
+        setShowOnboarding(true);
+        setOnboardingStep(0);
+      }
+    });
   }, [params.id]);
 
   async function checkAuthAndLoadJob() {
@@ -158,7 +175,15 @@ export default function JobPage({ params }: { params: { id: string } }) {
   async function handleSubmitApplication() {
     if (!job) return;
 
-    if (!confirm("Are you sure you want to mark this application as submitted?")) {
+    const confirmed = await confirm({
+      title: "Submit Application",
+      message: "Are you sure you want to mark this application as submitted?",
+      confirmText: "Yes, Submit",
+      cancelText: "Cancel",
+      type: "info"
+    });
+
+    if (!confirmed) {
       return;
     }
 
@@ -167,9 +192,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
 
     if (updated) {
       setJob({ ...job, status: "Submitted" });
-      alert("Application marked as submitted!");
+      toast.success("Application marked as submitted!");
     } else {
-      alert("Failed to update application status");
+      toast.error("Failed to update application status");
     }
 
     setSubmitting(false);
@@ -209,13 +234,13 @@ export default function JobPage({ params }: { params: { id: string } }) {
       if (response.ok) {
         setShowEditModal(false);
         await loadJob();
-        alert("Job updated and documents reingested!");
+        toast.success("Job updated and documents reingested!");
       } else {
-        alert("Failed to update job");
+        toast.error("Failed to update job");
       }
     } catch (err) {
       console.error('Update error:', err);
-      alert("Failed to update job");
+      toast.error("Failed to update job");
     }
     setUpdating(false);
   }
@@ -246,16 +271,16 @@ export default function JobPage({ params }: { params: { id: string } }) {
             relation: updatedReferral.relation || "",
           });
           setShowReferralModal(false);
-          alert("Referral updated successfully!");
+          toast.success("Referral updated successfully!");
         } else {
-          alert("Referral updated, but failed to refresh data. Please try again.");
+          toast.warning("Referral updated, but failed to refresh data. Please try again.");
         }
       } else {
-        alert("Failed to update referral");
+        toast.error("Failed to update referral");
       }
     } catch (err) {
       console.error('Update referral error:', err);
-      alert("Failed to update referral");
+      toast.error("Failed to update referral");
     }
     setUpdatingReferral(false);
   }
@@ -286,7 +311,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
 
   async function completeFullOnboarding() {
     // Clear onboarding state
-    clearOnboardingState();
+    await clearOnboardingState();
     
     // Mark onboarding as completed in the database
     try {
@@ -304,7 +329,15 @@ export default function JobPage({ params }: { params: { id: string } }) {
   async function handleDelete() {
     if (!job) return;
 
-    if (!confirm(`Are you sure you want to delete this job application for ${job.company_name}? This will delete all related data including chat history and answers.`)) {
+    const confirmed = await confirm({
+      title: "Delete Job Application",
+      message: `Are you sure you want to delete this job application for ${job.company_name}? This will delete all related data including chat history and answers.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      type: "danger"
+    });
+
+    if (!confirmed) {
       return;
     }
 
@@ -315,15 +348,15 @@ export default function JobPage({ params }: { params: { id: string } }) {
       });
 
       if (response.ok) {
-        alert("Job deleted successfully");
+        toast.success("Job deleted successfully");
         router.push("/dashboard");
       } else {
-        alert("Failed to delete job");
+        toast.error("Failed to delete job");
         setDeleting(false);
       }
     } catch (err) {
       console.error('Delete error:', err);
-      alert("Failed to delete job");
+      toast.error("Failed to delete job");
       setDeleting(false);
     }
   }
@@ -419,6 +452,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
           </div>
           <div className="flex items-center gap-3">
             <button
+              id="referral-button"
               onClick={() => setShowReferralModal(true)}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all shadow-sm"
             >
@@ -428,6 +462,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
               Referral
             </button>
             <button
+              id="cover-letter-button"
               onClick={() => setShowCoverLetterModal(true)}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all shadow-sm"
             >
@@ -828,6 +863,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
         jobDescription={job.job_description || undefined}
         userId={userId}
       />
+
+      {/* Confirmation Dialog */}
+      {dialog}
     </div>
   );
 }

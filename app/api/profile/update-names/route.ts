@@ -20,13 +20,13 @@ export async function POST(request: NextRequest) {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Use admin client to update profile with name information
-    const { error: profileError } = await supabaseAdmin
+    const { error: profileError } = await (supabaseAdmin as any)
       .from("profiles")
       .upsert({
         id: userId,
         first_name: firstName,
         last_name: lastName,
-      }, {
+      } as any, {
         onConflict: 'id',
         ignoreDuplicates: false,
       });

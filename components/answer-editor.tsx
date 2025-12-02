@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { QuestionService } from "@/lib/supabase/services/question.service";
 import type { QuestionStatus } from "@/lib/supabase/types";
+import { toast } from "@/components/toast";
 
 export type AnswerEditorPanelProps = {
   fullscreen?: boolean;
@@ -252,7 +253,7 @@ export function AnswerEditorPanel({
     if (!selected || !jobId) return;
 
     if (!answer || answer.trim().length === 0) {
-      alert("Please write an answer before requesting feedback.");
+      toast.warning("Please write an answer before requesting feedback.");
       return;
     }
 
@@ -286,11 +287,11 @@ export function AnswerEditorPanel({
           await onQuestionsChange();
         }
       } else {
-        alert("Failed to generate feedback. Please try again.");
+        toast.error("Failed to generate feedback. Please try again.");
       }
     } catch (error) {
       console.error("Failed to request feedback:", error);
-      alert("Failed to generate feedback. Please try again.");
+      toast.error("Failed to generate feedback. Please try again.");
     } finally {
       setGeneratingFeedback(false);
     }
@@ -308,11 +309,11 @@ export function AnswerEditorPanel({
           onFeedback(dbQuestion.feedback_score || null, dbQuestion.feedback_notes || "");
         }
       } else {
-        alert("No feedback available yet. Click 'Request feedback' first.");
+        toast.info("No feedback available yet. Click 'Request feedback' first.");
       }
     } catch (error) {
       console.error("Failed to load feedback:", error);
-      alert("Failed to load feedback.");
+      toast.error("Failed to load feedback.");
     }
   };
 

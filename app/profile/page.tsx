@@ -7,6 +7,7 @@ import { ProfileService } from "@/lib/supabase/services";
 import type { Profile } from "@/lib/supabase/types";
 import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overlay";
 import { Header } from "@/components/header";
+import { toast } from "@/components/toast";
 import {
   getOnboardingState,
   setOnboardingState,
@@ -98,9 +99,10 @@ export default function ProfilePage() {
       setMarketingEmails(data.marketing_emails);
 
       // Check if onboarding is needed
-      if (!data.onboarding_completed && shouldShowOnboarding("profile")) {
+      const shouldShow = await shouldShowOnboarding("profile");
+      if (!data.onboarding_completed && shouldShow) {
         setShowOnboarding(true);
-        const state = getOnboardingState();
+        const state = await getOnboardingState();
         setOnboardingStep(state?.step || 0);
       }
     }
@@ -119,14 +121,14 @@ export default function ProfilePage() {
 
     if (updated) {
       setProfile(updated);
-      alert("Profile updated successfully!");
+      toast.success("Profile updated successfully!");
 
       // Auto-complete profile onboarding if on the last step
       if (showOnboarding && onboardingStep === 4) {
         setTimeout(() => handleOnboardingComplete(), 800);
       }
     } else {
-      alert("Failed to update profile");
+      toast.error("Failed to update profile");
     }
 
     setSaving(false);
@@ -165,41 +167,41 @@ export default function ProfilePage() {
     },
   ];
 
-  const handleOnboardingNext = () => {
-    const state = getOnboardingState();
+  const handleOnboardingNext = async () => {
+    const state = await getOnboardingState();
     if (!state) return;
 
     const newState = {
       ...state,
       step: onboardingStep + 1,
     };
-    setOnboardingState(newState);
+    await setOnboardingState(newState);
     setOnboardingStep(onboardingStep + 1);
   };
 
-  const handleOnboardingPrevious = () => {
-    const state = getOnboardingState();
+  const handleOnboardingPrevious = async () => {
+    const state = await getOnboardingState();
     if (!state) return;
 
     const newState = {
       ...state,
       step: Math.max(0, onboardingStep - 1),
     };
-    setOnboardingState(newState);
+    await setOnboardingState(newState);
     setOnboardingStep(Math.max(0, onboardingStep - 1));
   };
 
   const handleOnboardingSkip = async () => {
     // Mark onboarding complete in DB and clear state
     await ProfileService.updateProfile({ onboarding_completed: true });
-    advanceOnboarding("profile", "completed");
+    await advanceOnboarding("profile", "completed");
     setShowOnboarding(false);
     router.push("/dashboard");
   };
 
   const handleOnboardingComplete = async () => {
     // Advance to dashboard phase
-    advanceOnboarding("profile", "dashboard");
+    await advanceOnboarding("profile", "dashboard");
     setShowOnboarding(false);
     router.push("/dashboard");
   };
@@ -207,7 +209,7 @@ export default function ProfilePage() {
 
   async function handleResumeUpload(file: File) {
     if (file.type !== "application/pdf") {
-      alert("Please upload a PDF file");
+      toast.error("Please upload a PDF file");
       return;
     }
 
@@ -225,9 +227,9 @@ export default function ProfilePage() {
           setResumeText(updatedProfile.resume_text || "");
 
           if (updatedProfile.resume_text) {
-            alert(`Resume uploaded! Extracted ${updatedProfile.resume_text.length.toLocaleString()} characters for AI coaching.`);
+            toast.success("Resume uploaded!", `Extracted ${updatedProfile.resume_text.length.toLocaleString()} characters for AI coaching.`);
           } else {
-            alert("Resume uploaded! Text extraction is processing...");
+            toast.info("Resume uploaded!", "Text extraction is processing...");
           }
 
           // Auto-advance onboarding if on resume step
@@ -238,14 +240,14 @@ export default function ProfilePage() {
         setUploading(false);
       }, 2000);
     } else {
-      alert("Failed to upload resume");
+      toast.error("Failed to upload resume");
       setUploading(false);
     }
   }
 
   async function handleTranscriptUpload(file: File) {
     if (file.type !== "application/pdf") {
-      alert("Please upload a PDF file");
+      toast.error("Please upload a PDF file");
       return;
     }
 
@@ -263,9 +265,9 @@ export default function ProfilePage() {
           setTranscriptText(updatedProfile.transcript_text || "");
 
           if (updatedProfile.transcript_text) {
-            alert(`Transcript uploaded! Extracted ${updatedProfile.transcript_text.length.toLocaleString()} characters for AI coaching.`);
+            toast.success("Transcript uploaded!", `Extracted ${updatedProfile.transcript_text.length.toLocaleString()} characters for AI coaching.`);
           } else {
-            alert("Transcript uploaded! Text extraction is processing...");
+            toast.info("Transcript uploaded!", "Text extraction is processing...");
           }
 
           // Auto-advance onboarding if on transcript step
@@ -276,7 +278,7 @@ export default function ProfilePage() {
         setUploadingTranscript(false);
       }, 2000);
     } else {
-      alert("Failed to upload transcript");
+      toast.error("Failed to upload transcript");
       setUploadingTranscript(false);
     }
   }
@@ -322,9 +324,9 @@ export default function ProfilePage() {
     );
 
     if (success) {
-      alert("Preferences updated!");
+      toast.success("Preferences updated!");
     } else {
-      alert("Failed to update preferences");
+      toast.error("Failed to update preferences");
     }
   }
 
@@ -335,7 +337,7 @@ export default function ProfilePage() {
     if (url) {
       window.open(url, '_blank');
     } else {
-      alert('Failed to load resume');
+      toast.error('Failed to load resume');
     }
   }
 
@@ -346,7 +348,7 @@ export default function ProfilePage() {
     if (url) {
       window.open(url, '_blank');
     } else {
-      alert('Failed to load transcript');
+      toast.error('Failed to load transcript');
     }
   }
 
@@ -356,7 +358,7 @@ export default function ProfilePage() {
 
   async function confirmDeleteAccount() {
     if (!deletePassword.trim()) {
-      alert("Please enter your password to confirm deletion");
+      toast.error("Please enter your password to confirm deletion");
       return;
     }
 
@@ -370,7 +372,7 @@ export default function ProfilePage() {
       });
 
       if (authError) {
-        alert("Incorrect password. Please try again.");
+        toast.error("Incorrect password. Please try again.");
         setDeleting(false);
         return;
       }
@@ -392,12 +394,12 @@ export default function ProfilePage() {
         router.push("/");
       } else {
         const errorData = await response.json();
-        alert(`Failed to delete account: ${errorData.error || 'Unknown error'}`);
+        toast.error("Failed to delete account", errorData.error || 'Unknown error');
         setDeleting(false);
       }
     } catch (err) {
       console.error('Delete account error:', err);
-      alert("An error occurred while deleting your account");
+      toast.error("An error occurred while deleting your account");
       setDeleting(false);
     }
   }

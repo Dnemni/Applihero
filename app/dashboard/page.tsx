@@ -7,6 +7,8 @@ import { JobService, ProfileService } from "@/lib/supabase/services";
 import type { Job } from "@/lib/supabase/types";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { Header } from "@/components/header";
+import { toast } from "@/components/toast";
+import { useConfirmation } from "@/components/confirmation-dialog";
 import {
   getOnboardingState,
   advanceOnboarding,
@@ -31,6 +33,7 @@ const statusStyles = {
 export default function DashboardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { confirm, dialog } = useConfirmation();
   const [jobs, setJobs] = useState<JobSessionCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
@@ -64,10 +67,12 @@ export default function DashboardPage() {
     checkAuthAndLoadJobs();
 
     // Check if we should show dashboard onboarding
-    if (shouldShowOnboarding('dashboard')) {
-      setShowOnboarding(true);
-      setOnboardingStep(0);
-    }
+    shouldShowOnboarding('dashboard').then(should => {
+      if (should) {
+        setShowOnboarding(true);
+        setOnboardingStep(0);
+      }
+    });
   }, []);
 
   async function checkAuthAndLoadJobs() {
@@ -132,16 +137,16 @@ export default function DashboardPage() {
     }
   }
 
-  function handleOnboardingSkip() {
+  async function handleOnboardingSkip() {
     setShowOnboarding(false);
     // Advance to job-creation phase
-    advanceOnboarding('dashboard', 'job-creation');
+    await advanceOnboarding('dashboard', 'job-creation');
   }
 
-  function handleOnboardingComplete() {
+  async function handleOnboardingComplete() {
     setShowOnboarding(false);
     // Advance to job-creation phase
-    advanceOnboarding('dashboard', 'job-creation');
+    await advanceOnboarding('dashboard', 'job-creation');
   }
 
   function handleNewApplicationClick(e: React.MouseEvent) {
@@ -158,7 +163,15 @@ export default function DashboardPage() {
   }
 
   async function handleDeleteJob(jobId: string, jobTitle: string, companyName: string) {
-    if (!confirm(`Are you sure you want to delete the application for ${jobTitle} at ${companyName}? This will delete all related data including chat history and answers.`)) {
+    const confirmed = await confirm({
+      title: "Delete Job Application",
+      message: `Are you sure you want to delete the application for ${jobTitle} at ${companyName}? This will delete all related data including chat history and answers.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      type: "danger"
+    });
+
+    if (!confirmed) {
       return;
     }
 
@@ -171,13 +184,13 @@ export default function DashboardPage() {
       if (response.ok) {
         // Remove from UI
         setJobs(jobs.filter(j => j.id !== jobId));
-        alert("Job deleted successfully");
+        toast.success("Job deleted successfully");
       } else {
-        alert("Failed to delete job");
+        toast.error("Failed to delete job");
       }
     } catch (err) {
       console.error('Delete error:', err);
-      alert("Failed to delete job");
+      toast.error("Failed to delete job");
     }
     setDeletingId(null);
     setOpenMenuId(null);
@@ -263,15 +276,22 @@ export default function DashboardPage() {
               <h3 className="mt-2 text-sm font-semibold text-gray-900">No applications yet</h3>
               <p className="mt-1 text-sm text-gray-500">Get started by creating your first application.</p>
               <div className="mt-6">
-                <a
-                  href="/dashboard/new"
-                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                <button
+                  onClick={(e) => {
+                    if (showOnboarding && onboardingStep !== 2) {
+                      e.preventDefault();
+                      return; // Block during onboarding until final step
+                    }
+                    router.push('/dashboard/new');
+                  }}
+                  disabled={showOnboarding && onboardingStep !== 2}
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600 transition-colors"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
                   New application
-                </a>
+                </button>
               </div>
             </div>
           ) : (
@@ -377,6 +397,9 @@ export default function DashboardPage() {
           showProgress={true}
         />
       )}
+
+      {/* Confirmation Dialog */}
+      {dialog}
 
       {/* Footer removed on dashboard */}
     </div>

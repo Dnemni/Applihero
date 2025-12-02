@@ -10,6 +10,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,9 +20,17 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Set session duration based on Remember Me: 1 hour (3600s) default, 6 hours (21600s) if checked
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
+        options: {
+          // Note: This sets the refresh token expiry, not the access token
+          // Access token is always 1 hour, but with Remember Me we extend the refresh window
+          data: {
+            session_timeout: rememberMe ? 21600 : 3600
+          }
+        }
       });
 
       if (error) throw error;
@@ -112,8 +121,14 @@ export default function LoginPage() {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center">
-                  <input type="checkbox" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-                  <span className="ml-2 text-gray-600">Remember me</span>
+                  <input 
+                    type="checkbox" 
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    disabled={loading}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed" 
+                  />
+                  <span className="ml-2 text-gray-600">Remember me (6 hours)</span>
                 </label>
                 <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Forgot password?</a>
               </div>

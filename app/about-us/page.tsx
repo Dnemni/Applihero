@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { toast } from "@/components/toast";
 
 type TeamMember = {
     name: string;
@@ -62,7 +63,7 @@ export default function AboutUsPage() {
 
     async function handleSubmitFeedback() {
         if (!feedbackText.trim()) {
-            alert("Please enter your feedback or bug report");
+            toast.warning("Please enter your feedback or bug report");
             return;
         }
 
@@ -78,12 +79,12 @@ export default function AboutUsPage() {
             // Simulate API call
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            alert(`Thank you for your ${feedbackType === "bug" ? "bug report" : "feedback"}! We'll review it soon.`);
+            toast.success(`Thank you for your ${feedbackType === "bug" ? "bug report" : "feedback"}!`, "We'll review it soon.");
             setFeedbackText("");
             setShowFeedbackModal(false);
         } catch (error) {
             console.error("Error submitting feedback:", error);
-            alert("Failed to submit feedback. Please try again.");
+            toast.error("Failed to submit feedback. Please try again.");
         } finally {
             setSubmitting(false);
         }

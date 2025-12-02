@@ -21,12 +21,12 @@ export async function POST(
 
     const jobId = params.id;
 
-    // Get user's profile (resume & transcript)
+    // Get user's profile (resume, transcript & bio)
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .select('resume_text, transcript_text')
+      .select('resume_text, transcript_text, bio')
       .eq('id', userId)
-      .single();
+      .single() as { data: any; error: any };
 
     if (profileError) {
       console.error("Error fetching profile:", profileError);
@@ -36,8 +36,10 @@ export async function POST(
     console.log('Profile data:', {
       hasResumeText: !!profile?.resume_text,
       hasTranscriptText: !!profile?.transcript_text,
+      hasBio: !!profile?.bio,
       resumeLength: profile?.resume_text?.length || 0,
       transcriptLength: profile?.transcript_text?.length || 0,
+      bioLength: profile?.bio?.length || 0,
     });
 
     // Get job details
@@ -45,7 +47,7 @@ export async function POST(
       .from('jobs')
       .select('job_title, company_name, job_description')
       .eq('id', jobId)
-      .single();
+      .single() as { data: any; error: any };
 
     if (jobError) {
       console.error("Error fetching job:", jobError);
@@ -65,9 +67,9 @@ export async function POST(
           title: 'Resume',
           content: profile.resume_text,
           document_url: null,
-        })
+        } as any)
         .select()
-        .single();
+        .single() as { data: any; error: any };
 
       if (resumeDocError) {
         console.error('Resume doc insert error:', resumeDocError);
@@ -94,9 +96,9 @@ export async function POST(
           title: 'Academic Transcript',
           content: profile.transcript_text,
           document_url: null,
-        })
+        } as any)
         .select()
-        .single();
+        .single() as { data: any; error: any };
 
       if (transcriptDocError) {
         console.error('Transcript doc insert error:', transcriptDocError);
@@ -112,7 +114,36 @@ export async function POST(
       console.log('No transcript_text found in profile');
     }
 
-    // 3. Ingest Job Description
+    // 3. Ingest Bio
+    if (profile.bio) {
+      console.log('Inserting bio document...');
+      const { data: bioDoc, error: bioDocError } = await supabaseAdmin
+        .from('job_documents')
+        .insert({
+          job_id: jobId,
+          document_type: 'other',
+          title: 'Personal Bio',
+          content: profile.bio,
+          document_url: null,
+        } as any)
+        .select()
+        .single() as { data: any; error: any };
+
+      if (bioDocError) {
+        console.error('Bio doc insert error:', bioDocError);
+      } else if (bioDoc) {
+        console.log('Bio document created:', bioDoc.id);
+        documentsToIngest.push({
+          id: bioDoc.id,
+          content: profile.bio,
+          type: 'bio'
+        });
+      }
+    } else {
+      console.log('No bio found in profile');
+    }
+
+    // 4. Ingest Job Description
     if (job.job_description) {
       console.log('Inserting job description document...');
       const { data: jobDoc, error: jobDocError } = await supabaseAdmin
@@ -123,9 +154,9 @@ export async function POST(
           title: `${job.job_title} at ${job.company_name}`,
           content: job.job_description,
           document_url: null,
-        })
+        } as any)
         .select()
-        .single();
+        .single() as { data: any; error: any };
 
       if (jobDocError) {
         console.error('Job description doc insert error:', jobDocError);

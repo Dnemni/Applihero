@@ -290,8 +290,8 @@ export function OnboardingOverlay({
         />
       </svg>
 
-      {/* Four blocking divs that surround the spotlight area */}
-      {targetRect ? (
+      {/* Four blocking divs that surround the spotlight area - only block if not last step */}
+      {!isLastStep && targetRect ? (
         <>
           {/* Top blocking area */}
           <div 
@@ -334,10 +334,10 @@ export function OnboardingOverlay({
             }}
           />
         </>
-      ) : (
-        /* Full screen blocking when no target */
+      ) : !isLastStep ? (
+        /* Full screen blocking when no target and not last step */
         <div className="absolute inset-0 pointer-events-auto" style={{ cursor: 'not-allowed' }} />
-      )}
+      ) : null}
 
       {/* Highlighted element border with pulse animation */}
       {targetRect && (

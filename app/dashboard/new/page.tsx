@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 import { JobService } from "@/lib/supabase/services";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { Header } from "@/components/header";
+import { toast } from "@/components/toast";
 import type { OnboardingStep } from "@/components/onboarding-overlay";
 import {
   getOnboardingState,
@@ -72,10 +73,12 @@ export default function NewJobPage() {
     checkAuth();
 
     // Check if we should show job-creation onboarding
-    if (shouldShowOnboarding('job-creation')) {
-      setShowOnboarding(true);
-      setOnboardingStep(0);
-    }
+    shouldShowOnboarding('job-creation').then(should => {
+      if (should) {
+        setShowOnboarding(true);
+        setOnboardingStep(0);
+      }
+    });
   }, []);
 
   async function checkAuth() {
@@ -92,7 +95,7 @@ export default function NewJobPage() {
     e.preventDefault();
 
     if (!jobTitle.trim() || !company.trim()) {
-      alert("Please fill in job title and company");
+      toast.error("Please fill in job title and company");
       return;
     }
 
@@ -107,7 +110,7 @@ export default function NewJobPage() {
       );
 
       if (!newJob) {
-        alert("Failed to create job application");
+        toast.error("Failed to create job application");
         setSubmitting(false);
         return;
       }
@@ -150,9 +153,9 @@ export default function NewJobPage() {
       }
 
       // Store job ID in onboarding state if onboarding is active
-      const state = getOnboardingState();
+      const state = await getOnboardingState();
       if (state && state.phase === 'job-creation') {
-        setOnboardingState({
+        await setOnboardingState({
           ...state,
           phase: 'job-detail',
           step: 0,
@@ -162,9 +165,9 @@ export default function NewJobPage() {
 
       // Navigate to the job page
       router.push(`/jobs/${newJob.id}`);
-    } catch (error) {
-      console.error("Error creating job:", error);
-      alert("Failed to create job application");
+    } catch (err) {
+      console.error("Error creating job:", err);
+      toast.error("Failed to create job application");
       setSubmitting(false);
     }
   }
@@ -182,16 +185,16 @@ export default function NewJobPage() {
     }
   }
 
-  function handleOnboardingSkip() {
+  async function handleOnboardingSkip() {
     setShowOnboarding(false);
     // Advance to job-detail phase
-    advanceOnboarding('job-creation', 'job-detail');
+    await advanceOnboarding('job-creation', 'job-detail');
   }
 
-  function handleOnboardingComplete() {
+  async function handleOnboardingComplete() {
     setShowOnboarding(false);
     // Advance to job-detail phase
-    advanceOnboarding('job-creation', 'job-detail');
+    await advanceOnboarding('job-creation', 'job-detail');
   }
 
   if (redirecting) {

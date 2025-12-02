@@ -5,6 +5,8 @@ import { tmpdir } from "os";
 import path from "path";
 import { randomUUID } from "crypto";
 import { writeFile, unlink } from "fs/promises";
+// Ensure Vercel includes pdf.js-extract in the serverless bundle
+import 'pdf.js-extract';
 export const runtime = 'nodejs';
 
 /**

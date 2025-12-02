@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/client";
-// Use dynamic import to handle CommonJS/ESM interop for pdf-parse
+import { PDFExtract } from 'pdf.js-extract';
 
 /**
  * POST /api/profile/extract-text
@@ -31,11 +31,15 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Extract text from PDF using serverless-friendly pdf-parse
-    const pdfModule = await import('pdf-parse');
-    const pdfParseFn = ((pdfModule as any).default ?? (pdfModule as any)) as (data: Buffer) => Promise<{ text: string }>;
-    const parsed = await pdfParseFn(buffer);
-    const extractedText = (parsed.text || '').trim();
+    // Extract text from PDF using pdf.js-extract
+    const pdfExtract = new PDFExtract();
+    const options = {}; // Use default options, worker is handled automatically
+    const data = await pdfExtract.extractBuffer(buffer, options);
+
+    // Combine text from all pages
+    const extractedText = data.pages
+      .map(page => page.content.map(item => item.str).join(' '))
+      .join('\n\n');
 
     if (!extractedText || extractedText.trim().length === 0) {
       return NextResponse.json({

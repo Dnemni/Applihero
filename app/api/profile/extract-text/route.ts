@@ -31,10 +31,9 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Extract text from PDF using pdf.js-extract
+    // Extract text from PDF using pdf.js-extract (no-worker mode for serverless)
     const pdfExtract = new PDFExtract();
-    const options = {}; // Use default options, worker is handled automatically
-    const data = await pdfExtract.extractBuffer(buffer, options);
+    const data = await pdfExtract.extractBuffer(buffer, { disableWorker: true } as any);
 
     // Combine text from all pages
     const extractedText = data.pages

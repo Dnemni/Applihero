@@ -21,8 +21,8 @@ export function Header({ showAboutUs = false, showDashboard = false, showProfile
         <div className="border-b border-gray-200/50 bg-white/60 backdrop-blur-lg">
             <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <a href="/dashboard" className="flex items-center gap-2">
-                        <img src="/applihero.png" alt="Applihero Logo" className="h-8 w-8" />
+                    <a href="/dashboard" className="flex items-center gap-3">
+                        <img src="/applihero_none.png" alt="Applihero Logo" className="h-10 w-10" />
                         <span className="text-xl font-bold text-gray-900">Applihero</span>
                     </a>
                     {showAboutUs && (

@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase/client";
 import { JobService, ProfileService } from "@/lib/supabase/services";
 import type { Job } from "@/lib/supabase/types";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
-import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import {
   getOnboardingState,
@@ -81,8 +80,20 @@ export default function DashboardPage() {
       return;
     }
 
-    // Get user name
-    const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || "there";
+    // Get user name from profile
+    const profile = await ProfileService.getCurrentProfile();
+    let fullName = "there";
+    
+    if (profile?.first_name && profile?.last_name) {
+      fullName = `${profile.first_name} ${profile.last_name}`;
+    } else if (user.user_metadata?.first_name && user.user_metadata?.last_name) {
+      fullName = `${user.user_metadata.first_name} ${user.user_metadata.last_name}`;
+    } else if (user.user_metadata?.full_name) {
+      fullName = user.user_metadata.full_name;
+    } else if (user.email) {
+      fullName = user.email.split('@')[0];
+    }
+    
     setUserName(fullName);
 
     // Load jobs
@@ -209,13 +220,13 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex flex-col">
-      <Header showAboutUs showProfile />
+      <Header showProfile />
 
       <div className="max-w-7xl mx-auto px-8 py-12 flex-1 w-full">
         <div className="mb-8 flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <h1 className="text-3xl font-bold text-gray-900 text-left">
-              {userName ? `Welcome back, ${userName.split(' ')[0]}!` : "Your applications"}
+              {userName && userName !== "there" ? `Welcome back, ${userName}!` : "Your applications"}
             </h1>
             <p className="mt-2 text-lg text-gray-600 text-left">
               {jobs.length === 0 ? "Start tracking your job applications" : "Track roles you're applying to and continue inquiring."}
@@ -367,7 +378,7 @@ export default function DashboardPage() {
         />
       )}
 
-      <Footer />
+      {/* Footer removed on dashboard */}
     </div>
   );
 }

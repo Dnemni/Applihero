@@ -8,11 +8,11 @@ import { initializeOnboarding } from "@/lib/onboarding-state";
 
 export default function SignupPage() {
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -32,52 +32,50 @@ export default function SignupPage() {
       return;
     }
 
-    if (!agreeToTerms) {
-      setError("Please agree to the Terms of Service");
-      return;
-    }
-
     setLoading(true);
 
     try {
-      // Sign up the user
+      // Sign up the user with metadata
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            full_name: fullName,
+            first_name: firstName,
+            last_name: lastName,
+            full_name: `${firstName} ${lastName}`,
           },
+          emailRedirectTo: `${window.location.origin}/login`,
         },
       });
 
       if (error) throw error;
 
       if (data.user) {
-        // Split full name into first and last name
-        const nameParts = fullName.trim().split(" ");
-        const firstName = nameParts[0] || "";
-        const lastName = nameParts.slice(1).join(" ") || "";
+        // Call API endpoint to update profile with admin privileges
+        try {
+          const response = await fetch('/api/profile/update-names', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: data.user.id,
+              firstName,
+              lastName,
+            }),
+          });
 
-        // Update the profile with name information
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .update({
-            first_name: firstName,
-            last_name: lastName,
-          })
-          .eq('id', data.user.id);
-
-        if (profileError) {
-          console.error("Error updating profile:", profileError);
+          if (!response.ok) {
+            console.error('Failed to update profile names');
+          }
+        } catch (profileError) {
+          console.error('Error calling profile update API:', profileError);
         }
 
         setSuccess(true);
-        // Initialize onboarding and redirect to profile
+        // Show success message, then redirect to login
         setTimeout(() => {
-          initializeOnboarding();
-          router.push("/profile");
-        }, 2000);
+          router.push("/login");
+        }, 5000);
       }
     } catch (err: any) {
       setError(err.message || "Failed to create account");
@@ -87,16 +85,23 @@ export default function SignupPage() {
   }
 
   return (
+    <>
+      <style jsx>{`
+        @keyframes loading {
+          from {
+            width: 0%;
+          }
+          to {
+            width: 100%;
+          }
+        }
+      `}</style>
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
       {/* Top Navigation */}
       <div className="border-b border-gray-200/50 bg-white/60 backdrop-blur-lg">
         <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-600 to-blue-600 flex items-center justify-center">
-              <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
+          <a href="/" className="flex items-center gap-3">
+            <img src="/applihero_none.png" alt="Applihero Logo" className="h-10 w-10" />
             <span className="text-xl font-bold text-gray-900">Applihero</span>
           </a>
 
@@ -106,9 +111,9 @@ export default function SignupPage() {
               className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white/80 backdrop-blur-sm px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
-              Home
+              Back
             </a>
           </div>
         </div>
@@ -125,6 +130,39 @@ export default function SignupPage() {
             </p>
           </div>
 
+          {/* Success Modal */}
+          {success && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md mx-4 border border-gray-200 animate-in fade-in zoom-in duration-200">
+                <div className="text-center">
+                  {/* Success Icon */}
+                  <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+                    <svg className="h-10 w-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  
+                  <h3 className="text-2xl font-bold text-gray-900 mb-3">Account Created Successfully!</h3>
+                  <p className="text-base text-gray-700 mb-2">
+                    Please check your email to verify your account before signing in.
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Redirecting to login page in 5 seconds...
+                  </p>
+                  
+                  {/* Loading indicator */}
+                  <div className="mt-6">
+                    <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-green-600 rounded-full animate-[loading_5s_linear]" style={{
+                        animation: 'loading 5s linear forwards'
+                      }}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl p-8 border border-gray-100">
             {error && (
               <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3">
@@ -132,24 +170,32 @@ export default function SignupPage() {
               </div>
             )}
 
-            {success && (
-              <div className="mb-4 rounded-lg bg-green-50 border border-green-200 p-3">
-                <p className="text-sm text-green-800">Account created successfully! Redirecting to dashboard...</p>
-              </div>
-            )}
-
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Full name</label>
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  required
-                  disabled={loading}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="John Doe"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">First name</label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    required
+                    disabled={loading}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="John"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Last name</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    required
+                    disabled={loading}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="Doe"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Email address</label>
@@ -189,21 +235,6 @@ export default function SignupPage() {
                   placeholder="••••••••"
                 />
               </div>
-              <div className="flex items-start text-sm">
-                <input
-                  type="checkbox"
-                  checked={agreeToTerms}
-                  onChange={(e) => setAgreeToTerms(e.target.checked)}
-                  disabled={loading}
-                  className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <span className="ml-2 text-gray-600">
-                  I agree to the{' '}
-                  <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Terms of Service</a>
-                  {' '}and{' '}
-                  <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Privacy Policy</a>
-                </span>
-              </div>
               <button
                 type="submit"
                 disabled={loading}
@@ -225,5 +256,6 @@ export default function SignupPage() {
         </div>
       </div>
     </div>
+    </>
   );
 }

@@ -14,15 +14,17 @@ export async function PUT(
     const jobId = params.id;
 
     // Update job
-    const { error: updateError } = await supabaseAdmin
+    const updateData: any = {
+      job_title: jobTitle,
+      company_name: companyName,
+      job_description: jobDescription,
+      updated_at: new Date().toISOString(),
+    };
+    
+    const { error: updateError } = (await supabaseAdmin
       .from('jobs')
-      .update({
-        job_title: jobTitle,
-        company_name: companyName,
-        job_description: jobDescription,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', jobId);
+      .update(updateData)
+      .eq('id', jobId)) as { data: any; error: any };
 
     if (updateError) {
       console.error('Error updating job:', updateError);
@@ -33,7 +35,7 @@ export async function PUT(
     const { data: existingDocs } = await supabaseAdmin
       .from('job_documents')
       .select('id')
-      .eq('job_id', jobId);
+      .eq('job_id', jobId) as { data: any; error: any };
 
     if (existingDocs && existingDocs.length > 0) {
       // Delete chunks first (foreign key constraint)
@@ -95,7 +97,7 @@ export async function DELETE(
     const { data: questions } = await supabaseAdmin
       .from('questions')
       .select('id')
-      .eq('job_id', jobId);
+      .eq('job_id', jobId) as { data: any; error: any };
 
     if (questions && questions.length > 0) {
       for (const question of questions) {
@@ -116,7 +118,7 @@ export async function DELETE(
     const { data: docs } = await supabaseAdmin
       .from('job_documents')
       .select('id')
-      .eq('job_id', jobId);
+      .eq('job_id', jobId) as { data: any; error: any };
 
     if (docs && docs.length > 0) {
       for (const doc of docs) {

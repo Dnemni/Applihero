@@ -20,7 +20,8 @@
     "lucide-react": "^0.555.0",
     "next": "14.0.4",
     "openai": "^6.9.1",
-    "pdf.js-extract": "^0.2.1",
+    "pdf.js-extract": "0.1.4",
+    "pdfjs-dist": "2.6.347",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0"

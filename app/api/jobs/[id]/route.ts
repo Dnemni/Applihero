@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/client";
+import { Database } from "@/lib/supabase/types";
+
+type JobUpdate = Database['public']['Tables']['jobs']['Update'];
 
 /**
  * PUT /api/jobs/[id]
@@ -14,17 +17,17 @@ export async function PUT(
     const jobId = params.id;
 
     // Update job
-    const updateData: any = {
+    const updateData: JobUpdate = {
       job_title: jobTitle,
       company_name: companyName,
       job_description: jobDescription,
       updated_at: new Date().toISOString(),
     };
     
-    const { error: updateError } = (await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin
       .from('jobs')
       .update(updateData)
-      .eq('id', jobId)) as { data: any; error: any };
+      .eq('id', jobId);
 
     if (updateError) {
       console.error('Error updating job:', updateError);

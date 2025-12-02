@@ -39,20 +39,16 @@ export const openai = new Proxy({} as OpenAI, {
   }
 });
 
-// Lazy initialization for admin client
-let _supabaseAdmin: ReturnType<typeof createClient> | null = null;
+// Admin client for server-side operations (direct initialization)
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-export const supabaseAdmin = new Proxy({} as ReturnType<typeof createClient>, {
-  get(target, prop) {
-    if (!_supabaseAdmin) {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!url || !key) {
-        throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+export const supabaseAdmin = url && key
+  ? createClient<Database>(url, key, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
       }
-      _supabaseAdmin = createClient(url, key);
-    }
-    return (_supabaseAdmin as any)[prop];
-  }
-});
+    })
+  : null as any;
 

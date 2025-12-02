@@ -20,8 +20,8 @@ async function main() {
   const pdfExtract = new PDFExtract();
 
   try {
-    // Run in plain Node (worker resolution works here). You can also pass { disableWorker: true } if desired.
-    const data = await pdfExtract.extract(filePath, {});
+    // Force no-worker mode to avoid pdf.worker.js resolution in serverless
+    const data = await pdfExtract.extract(filePath, { disableWorker: true });
     process.stdout.write(JSON.stringify(data));
   } catch (err) {
     console.error(err && err.stack ? err.stack : String(err));

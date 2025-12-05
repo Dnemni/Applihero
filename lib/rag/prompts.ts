@@ -18,13 +18,23 @@ You:
 export function buildCoachPrompt(opts: {
   question: string;
   contextChunks: string[];
+  previousMessages?: string;
 }) {
-  const { question, contextChunks } = opts;
+  const { question, contextChunks, previousMessages } = opts;
   const context = contextChunks.join("\n---\n");
 
-  return `
+  let promptText = `
 CONTEXT FROM RESUME & JOB DESCRIPTION:
-${context}
+${context}`;
+
+  if (previousMessages) {
+    promptText += `
+
+PREVIOUS CONVERSATION HISTORY:
+${previousMessages}`;
+  }
+
+  promptText += `
 
 USER QUESTION:
 ${question}
@@ -34,5 +44,8 @@ INSTRUCTIONS:
 - If the question is asking for advice or coaching, give brief bullet points (2-4 points max).
 - Do NOT provide full application guides, lengthy explanations, or structured templates unless specifically requested.
 - Be conversational and helpful, but concise.
+- Reference previous parts of the conversation when relevant to show continuity and demonstrate you remember what was discussed.
 `;
+
+  return promptText;
 }

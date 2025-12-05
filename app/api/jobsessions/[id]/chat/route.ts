@@ -18,6 +18,26 @@ export async function POST(
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     }
 
+    // Retrieve previous chat messages for context
+    let previousMessages = "";
+    try {
+      const { data: messages } = await supabaseAdmin
+        .from("chat_messages")
+        .select("role, content")
+        .eq("job_id", params.id)
+        .order("created_at", { ascending: true })
+        .limit(20); // Last 20 messages for context
+      
+      if (messages && messages.length > 0) {
+        previousMessages = (messages as any[])
+          .map((msg: any) => `${msg.role === "assistant" ? "Coach" : "User"}: ${msg.content}`)
+          .join("\n\n");
+      }
+    } catch (err) {
+      // If we can't get previous messages, continue without them
+      console.error("Error fetching previous messages:", err);
+    }
+
     // Retrieve contextual chunks
     const ctx = await retrieveContext({
       userId,
@@ -28,6 +48,7 @@ export async function POST(
     const prompt = buildCoachPrompt({
       question: message,
       contextChunks: ctx.map((c) => c.content),
+      previousMessages,
     });
 
     const completion = await openai.chat.completions.create({

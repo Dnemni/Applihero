@@ -24,6 +24,7 @@ type AnalysisParams = {
   settings: any;
   userId: string;
   jobId: string;
+  previousFeedback?: any;
 };
 
 type AnalysisResult = {
@@ -240,7 +241,7 @@ ${userProfile?.first_name} ${userProfile?.last_name}`,
 }
 
 export async function analyzeCoverLetter(params: AnalysisParams) {
-  const { content, jobDescription, settings, userId, jobId } = params;
+  const { content, jobDescription, settings, userId, jobId, previousFeedback } = params;
 
   // Retrieve contextual chunks
   const ctx = await retrieveContext({
@@ -252,9 +253,21 @@ export async function analyzeCoverLetter(params: AnalysisParams) {
 
   const contextStr = ctx.map((c) => c.content).join("\n---\n");
 
-  const systemPrompt = `You are a professional career advisor. Provide concise, high-signal feedback grounded ONLY in the provided background. Quote exact fragments, diagnose the issue, and give a concrete fix. Be direct and professional, not conversational.`;
+  const systemPrompt = `You are a professional career advisor providing expert feedback. Your feedback quality determines the score:
+- Exceptional letters (90-100): Compelling writing, highly relevant, specific examples, strong connection to role, professional tone
+- Strong letters (80-89): Good relevance, mostly specific, clear value proposition, minor tweaks possible
+- Good letters (60-79): Decent foundation, some generics mixed with specifics, needs improvement areas clear
+- Adequate letters (40-59): Attempts relevance but mostly generic, significant improvements needed
+- Weak letters (0-39): Lacks relevance, vague, no clear value proposition, needs major rework
 
-  const userPrompt = `Analyze this cover letter and provide concise, structured feedback.
+Feedback quality should match letter quality: excellent letters get mostly praise with minor suggestions, weak letters get constructive critique. No arbitrary quotas.
+${previousFeedback ? 'Track progress: Note if previous concerns have been addressed. Acknowledge improvements explicitly. Build on prior feedback.' : ''}`;
+
+  const previousFeedbackContext = previousFeedback 
+    ? `\n\nPREVIOUS FEEDBACK (for context and to track improvements):\n${typeof previousFeedback === 'object' && previousFeedback.suggestions ? previousFeedback.suggestions.join('\n') : JSON.stringify(previousFeedback)}`
+    : '';
+
+  const userPrompt = `Analyze this cover letter and provide expert feedback. Score should reflect actual quality (90-100 only for exceptional letters that are compelling, highly relevant, and well-executed).
 
 COVER LETTER:
 ${content}
@@ -262,25 +275,45 @@ ${content}
 JOB DESCRIPTION:
 ${jobDescription}
 
-CANDIDATE BACKGROUND (resume, transcript, bio):
-${contextStr}
+CANDIDATE BACKGROUND:
+${contextStr}${previousFeedbackContext}
 
-OUTPUT REQUIREMENTS (STRICT):
-- Return 4–6 suggestions.
-- Each suggestion must be ONE line, max 180 characters.
-- Structure each suggestion like: "\"<quoted phrase from letter>\" — <diagnosis>. Fix: <specific recommendation using actual background>."
-- Only use facts present in the background; if missing, advise to add [specific evidence from background] or remove the claim.
+OUTPUT REQUIREMENTS:
+- Return 5-8 feedback points (balance naturally based on quality, not quota).
+- Each point ONE line, max 180 characters.
+- CRITICAL: Extract exact phrases DIRECTLY FROM THE LETTER and put them in quotes.
+- Format positive feedback: "✓ \"<exact phrase from letter>\" — why this works. <impact>"
+- Format constructive: "\"<exact phrase from letter>\" — <issue>. Fix: <specific recommendation>"
+- Use exact background facts only. If missing, advise to add or remove.
+- If previous feedback exists: Note if the issue was addressed ("✓ Previously improved: ..."). Acknowledge progress.
+- QUOTES MUST BE VERBATIM FROM THE COVER LETTER TEXT - copy exact wording, do not paraphrase.
 
-EXAMPLES (STYLE ONLY, DO NOT REUSE CONTENT):
-- "\"passionate about sustainability\" — generic. Fix: cite [course/project from transcript/resume] that demonstrates this, e.g., 'Through [course], I…'"
-- "\"various projects\" — vague. Fix: name [project from resume] and outcome: 'Built X using Y; improved Z by N%.'"
-- "\"strong programming skills\" — unsupported. Fix: list skills from background: 'Proficient in A, B, C via [course/project].'"
+SCORING GUIDELINES (Be honest, not generous):
+- 90-100: Exceptional fit for role. Compelling narrative. Multiple specific, relevant examples. Strong writing. Clear why this candidate should be hired.
+- 80-89: Strong letter. Good relevance, specific details, clear value. Minor polish needed (phrasing, structure, one example).
+- 60-79: Decent foundation. Mix of specific and generic. Needs 1-2 significant improvements (more examples, stronger opening, clearer fit).
+- 40-59: Mediocre. Mostly generic or unclear connection to role. Needs major work (specific examples, relevance, voice).
+- 0-39: Weak. Vague, irrelevant, or confusing. Needs complete rethinking.
+
+Strength Indicators (0-100):
+- Relevance: Demonstrates knowledge of THIS role and company. References job description. Shows fit.
+- Professionalism: Grammar, tone, formatting, structure. Does it feel ready to send?
+- Clarity: Easy to understand. Clear what you bring and why. Logical flow.
+- Impact: Memorable. Compelling. Would make hiring manager want to interview? Emotional resonance.
+
+CRITICAL: For scores 90-100, require EVIDENCE:
+- Compelling narrative (not just list of skills)
+- Multiple highly specific, verified examples from background
+- Clear, authentic voice
+- Strong writing with no grammar/clarity issues
+- Unmistakable fit for THIS job (not generic)
 
 Return JSON only:
 {
   "score": <0-100>,
   "suggestions": [
-    "\"<quote>\" — <diagnosis>. Fix: <concise recommendation using background>",
+    "✓ \"strength\" — impact",
+    "\"area\" — diagnosis. Fix: recommendation",
     "..."
   ],
   "scores": { "relevance": <0-100>, "professionalism": <0-100>, "clarity": <0-100>, "impact": <0-100> }
@@ -293,7 +326,7 @@ Return JSON only:
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.3, // Lower temperature for more factual feedback
+      temperature: 0.6, // Slightly higher for nuanced, honest assessment
     });
 
     const text = completion.choices[0].message?.content || "";
@@ -307,18 +340,19 @@ Return JSON only:
 
   // Fallback
   return {
-    score: 79,
+    score: 72,
     suggestions: [
-      "Consider adding specific examples of your achievements",
-      "Strengthen your opening paragraph to grab attention",
-      "Connect your skills more explicitly to job requirements",
-      "Include measurable results or metrics from past work",
+      "✓ \"Strong foundation in programming languages\" — demonstrates relevant skills, showcasing your potential to contribute effectively.",
+      "\"Passionate about technology\" — too generic. Fix: Replace with specific projects or achievements that show your genuine passion.",
+      "✓ \"My experience with AI-powered tools\" — specific and relevant to the role requirements.",
+      "\"Seeking a role where I can grow\" — vague. Fix: Be specific about what aspects of THIS company and role align with your goals.",
+      "✓ \"Contributed to a team project\" — good, but could strengthen: Add specific measurable outcomes or impact.",
     ],
     scores: {
-      relevance: 80,
-      professionalism: 85,
-      clarity: 75,
-      impact: 78,
+      relevance: 75,
+      professionalism: 82,
+      clarity: 78,
+      impact: 68,
     },
   };
 }

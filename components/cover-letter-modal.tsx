@@ -59,6 +59,9 @@ export function CoverLetterModal({
   const [feedbackScores, setFeedbackScores] = useState<{ relevance: number; professionalism: number; clarity: number; impact: number } | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [lastName, setLastName] = useState<string>("");
+  const [feedbackContentHash, setFeedbackContentHash] = useState<string>("");
+  const [templatePreview, setTemplatePreview] = useState<Template | null>(null);
+  const [showTemplateConfirm, setShowTemplateConfirm] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -77,10 +80,14 @@ export function CoverLetterModal({
     }
   }, [isOpen, jobId]);
 
-  // Load feedback when switching to feedback tab
+  // Load feedback when switching to feedback tab AND content hash doesn't match
   useEffect(() => {
-    if (activeSection === "feedback" && content.trim() && !feedbackLoading && feedback.length === 0) {
-      getFeedback(content);
+    if (activeSection === "feedback" && content.trim() && !feedbackLoading) {
+      const hash = hashContent(content);
+      // Only fetch if content has changed since last feedback was generated
+      if (hash !== feedbackContentHash) {
+        getFeedback(content);
+      }
     }
   }, [activeSection]);
 
@@ -107,6 +114,10 @@ export function CoverLetterModal({
               if (typeof obj.overall === 'number') setFeedbackScore(obj.overall);
               if (obj.scores && typeof obj.scores === 'object') setFeedbackScores(obj.scores);
             }
+          }
+          // Store content hash so we know when feedback is out of sync
+          if (data.content) {
+            setFeedbackContentHash(hashContent(data.content));
           }
         }
       }
@@ -149,9 +160,23 @@ export function CoverLetterModal({
   };
 
   const useTemplate = (template: Template) => {
-    setContent(template.fullContent);
-    setSelectedTemplate(template);
-    // Don't get feedback immediately, only when user switches to feedback tab
+    setTemplatePreview(template);
+    setShowTemplateConfirm(true);
+  };
+
+  const confirmTemplate = () => {
+    if (!templatePreview) return;
+    setContent(templatePreview.fullContent);
+    setSelectedTemplate(templatePreview);
+    setShowTemplateConfirm(false);
+    setTemplatePreview(null);
+    // Clear feedback hash when new template is applied, so feedback will regenerate on switch to feedback tab
+    setFeedbackContentHash("");
+  };
+
+  const cancelTemplatePreview = () => {
+    setShowTemplateConfirm(false);
+    setTemplatePreview(null);
   };
 
   const getFeedback = async (text: string) => {
@@ -173,6 +198,8 @@ export function CoverLetterModal({
         setFeedback(data.suggestions || []);
         setFeedbackScore(data.score ?? null);
         setFeedbackScores(data.scores || null);
+        // Update content hash to mark feedback as current
+        setFeedbackContentHash(hashContent(text));
         // Persist feedback immediately so it isn't lost on close
         await saveFeedbackToDB({
           suggestions: data.suggestions || [],
@@ -304,25 +331,61 @@ export function CoverLetterModal({
 
   // Helpers: feedback formatting and editor highlighting
   const getQuotedPhrases = (text: string): string[] => {
-    const matches = text.match(/"([^"]+)"|'([^']+)'/g) || [];
-    return matches
+    // Extract phrases from both "phrase" and 'phrase' formats
+    const quotedMatches = text.match(/"([^"]+)"|'([^']+)'/g) || [];
+    const quoted = quotedMatches
       .map((m) => m.slice(1, -1))
       .filter((s) => s && s.trim().length > 0);
+    
+    // If no quotes found, extract the text before the em-dash (—) or arrow (→)
+    if (quoted.length === 0 && (text.includes('—') || text.includes('→'))) {
+      const parts = text.split(/[—→]/);
+      if (parts[0]) {
+        const phrase = parts[0].trim();
+        if (phrase.length > 0) {
+          return [phrase];
+        }
+      }
+    }
+    
+    return quoted;
   };
 
   const renderSuggestionWithBoldQuotes = (text: string) => {
-    // Split on quoted segments and wrap them in <strong>
-    const parts = text.split(/("[^"]+"|'[^']+')/g);
-    return parts.map((part, i) => {
-      if (/^"[^"]+"$|^'[^']+'$/.test(part)) {
-        return (
-          <strong key={i} className="font-semibold text-gray-900">
-            {part}
-          </strong>
-        );
-      }
-      return <span key={i}>{part}</span>;
-    });
+    // First try to bold quoted text with quote marks
+    const quotedPattern = /("[^"]+"|'[^']+')/g;
+    const parts = text.split(quotedPattern);
+    
+    // Check if there were any quoted sections
+    if (parts.some(p => /^["'][^"']*["']$/.test(p))) {
+      return parts.map((part, i) => {
+        if (/^"[^"]+"$|^'[^']+'$/.test(part)) {
+          return (
+            <strong key={i} className="font-semibold text-gray-900">
+              {part}
+            </strong>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      });
+    }
+    
+    // If no quote marks, bold the text before em-dash/arrow
+    if (text.includes('—') || text.includes('→')) {
+      const separator = text.includes('—') ? '—' : '→';
+      const [beforeSeparator, ...afterParts] = text.split(separator);
+      const after = afterParts.join(separator);
+      
+      return (
+        <>
+          <strong className="font-semibold text-gray-900">{beforeSeparator.trim()}</strong>
+          <span>{separator} {after}</span>
+        </>
+      );
+    }
+    
+    // Fallback: return as-is
+    return <span>{text}</span>;
   };
 
   const highlightInEditor = (phrase?: string) => {
@@ -335,7 +398,11 @@ export function CoverLetterModal({
       textarea.focus();
       try {
         textarea.setSelectionRange(idx, idx + phrase.length);
-      } catch {}
+        // Scroll to selection
+        textarea.scrollTop = (textarea.scrollHeight * idx) / contentLower.length;
+      } catch (e) {
+        console.error('Error highlighting:', e);
+      }
     }
   };
 
@@ -349,6 +416,17 @@ export function CoverLetterModal({
   };
 
   const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
+
+  // Simple hash function for content tracking
+  const hashContent = (text: string): string => {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString();
+  };
 
   if (!isOpen) return null;
 
@@ -412,10 +490,7 @@ export function CoverLetterModal({
               value={content}
               onChange={(e) => {
                 setContent(e.target.value);
-                // Clear feedback when content changes, will reload when switching to feedback tab
-                setFeedback([]);
-                setFeedbackScore(null);
-                setFeedbackScores(null);
+                // Don't clear feedback on edit - it will only regenerate when user clicks "Regenerate" or switches tabs with changed content
               }}
               ref={editorRef}
               placeholder="Start writing your cover letter or select a template..."
@@ -725,20 +800,24 @@ export function CoverLetterModal({
 
                     {/* Suggestions as Bullets */}
                     <div className="bg-white rounded-lg p-4 border border-gray-200">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-3">Suggestions for Improvement</h4>
-                      <ul className="space-y-2">
+                      <h4 className="text-sm font-semibold text-gray-900 mb-3">Feedback & Suggestions</h4>
+                      <ul className="space-y-2.5">
                         {feedback.map((item, idx) => {
-                          const quotes = getQuotedPhrases(item);
+                          const isPositive = item.startsWith("✓");
+                          const displayItem = isPositive ? item.slice(2).trim() : item;
+                          const quotes = getQuotedPhrases(displayItem);
                           const primary = quotes[0];
                           return (
                             <li
                               key={idx}
-                              className="flex gap-2 text-sm text-gray-700 group"
+                              className={`flex gap-2 text-sm group ${isPositive ? "text-green-700" : "text-gray-700"}`}
                               onMouseEnter={() => primary && highlightInEditor(primary)}
                               onMouseLeave={() => clearEditorSelection()}
                             >
-                              <span className="text-yellow-600 flex-shrink-0">•</span>
-                              <span>{renderSuggestionWithBoldQuotes(item)}</span>
+                              <span className={`flex-shrink-0 font-bold ${isPositive ? "text-green-600" : "text-amber-600"}`}>
+                                {isPositive ? "✓" : "→"}
+                              </span>
+                              <span>{renderSuggestionWithBoldQuotes(displayItem)}</span>
                             </li>
                           );
                         })}
@@ -794,6 +873,45 @@ export function CoverLetterModal({
             )}
           </div>
         </div>
+
+        {/* Template Preview Modal */}
+        {showTemplateConfirm && templatePreview && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={cancelTemplatePreview}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-purple-50">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xl font-bold text-gray-900">Preview Template</h3>
+                  <button
+                    onClick={cancelTemplatePreview}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600">{templatePreview.title}</p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="bg-white rounded-lg border border-gray-200 p-6 font-serif text-gray-800 leading-relaxed whitespace-pre-wrap">
+                  {templatePreview.fullContent}
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-200 flex justify-between gap-3 bg-gray-50">
+                <button
+                  onClick={cancelTemplatePreview}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmTemplate}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all"
+                >
+                  Use This Template
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

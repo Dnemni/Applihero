@@ -1,27 +1,4 @@
-
-
-export const metadata = {
-  title: "Applihero – AI Resume Builder & Job Application Coach",
-  description:
-    "Applihero is an AI resume builder and job application coach that analyzes your resume and job descriptions to help you write tailored cover letters, improve application answers, and prepare for interviews.",
-  metadataBase: new URL("https://applihero.com"),
-  alternates: { canonical: "https://applihero.com/" },
-  openGraph: {
-    title: "Applihero – AI Resume Builder & Job Application Coach",
-    description:
-      "Upload your resume and job descriptions and get personalized AI coaching for resumes, cover letters, and interviews.",
-    url: "https://applihero.com/",
-    siteName: "Applihero",
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Applihero – AI Resume Builder & Job Application Coach",
-    description:
-      "AI-powered coaching that tailors your resume, cover letters, and interview prep to each job you apply to.",
-  },
-};
-
+"use client"
 
 export default function HomePage() {
   const scrollToSection = (sectionId: string) => {

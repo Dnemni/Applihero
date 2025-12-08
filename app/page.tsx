@@ -1,4 +1,4 @@
-"use client";
+
 
 export const metadata = {
   title: "Applihero – AI Resume Builder & Job Application Coach",

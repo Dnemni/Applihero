@@ -3,14 +3,8 @@
 
   <!-- Public Pages -->
   <url><loc>https://applihero.com/</loc></url>
-  <url><loc>https://applihero.com/about</loc></url>
-  <url><loc>https://applihero.com/pricing</loc></url>
-  <url><loc>https://applihero.com/features</loc></url>
-  <url><loc>https://applihero.com/contact</loc></url>
-  <url><loc>https://applihero.com/terms</loc></url>
-  <url><loc>https://applihero.com/privacy</loc></url>
-  <url><loc>https://applihero.com/security</loc></url>
-  <url><loc>https://applihero.com/blog</loc></url>
+  <url><loc>https://applihero.com/login</loc></url>
+  <url><loc>https://applihero.com/signup</loc></url>
 
   <!-- Authenticated App (OPTIONAL to include) -->
   <!-- If your app requires login, Google cannot crawl these, so they can be omitted -->

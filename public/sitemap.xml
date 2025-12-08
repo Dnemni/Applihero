@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+
+  <!-- Public Pages -->
+  <url><loc>https://applihero.com/</loc></url>
+  <url><loc>https://applihero.com/about</loc></url>
+  <url><loc>https://applihero.com/pricing</loc></url>
+  <url><loc>https://applihero.com/features</loc></url>
+  <url><loc>https://applihero.com/contact</loc></url>
+  <url><loc>https://applihero.com/terms</loc></url>
+  <url><loc>https://applihero.com/privacy</loc></url>
+  <url><loc>https://applihero.com/security</loc></url>
+  <url><loc>https://applihero.com/blog</loc></url>
+
+  <!-- Authenticated App (OPTIONAL to include) -->
+  <!-- If your app requires login, Google cannot crawl these, so they can be omitted -->
+  <!-- Uncomment only if you want indexing of the login + onboarding pages -->
+
+  <!--
+  <url><loc>https://applihero.com/login</loc></url>
+  <url><loc>https://applihero.com/signup</loc></url>
+  <url><loc>https://applihero.com/reset-password</loc></url>
+  -->
+
+  <!-- Blog Posts (add dynamically as you write them) -->
+  <!-- Example: -->
+  <!--
+  <url><loc>https://applihero.com/blog/how-to-write-a-resume</loc></url>
+  <url><loc>https://applihero.com/blog/ats-optimization</loc></url>
+  -->
+
+</urlset>

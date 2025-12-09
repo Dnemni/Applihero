@@ -310,9 +310,31 @@ export default function ResumeOptimizerPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setFeedbackScore(data.score || 0);
-        setFeedback(data.feedback || null);
+        const score = data.score || 0;
+        const fb = data.feedback || null;
+
+        // Update local state for fast access
+        setFeedbackScore(score);
+        setFeedback(fb);
         setContentHash(hashContent(resumeText));
+
+        // Persist feedback to the latest resume version without creating a new one
+        if (selectedJobId && userId) {
+          try {
+            await fetch(`/api/resume-optimizer/${selectedJobId}/feedback`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                userId,
+                feedbackScore: score,
+                feedbackText: fb,
+              }),
+            });
+          } catch (persistError) {
+            console.error("Error persisting feedback to backend:", persistError);
+          }
+        }
+
         toast.success("Feedback generated!");
       } else {
         toast.error("Failed to generate feedback");

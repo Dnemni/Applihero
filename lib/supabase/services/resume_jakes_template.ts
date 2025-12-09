@@ -1,0 +1,291 @@
+export interface EducationEntry {
+  institution: string;
+  dateRange: string;
+  degree: string;
+  location: string;
+  bullets?: string[];
+}
+
+export interface ExperienceEntry {
+  title: string;     // e.g. "Founder & Developer"
+  dateRange: string; // e.g. "May 2025 -- Present"
+  company: string;   // e.g. "AI-powered Course Manager & Study Helper"
+  location: string;  // e.g. "Saratoga, CA"
+  bullets: string[];
+}
+
+export interface ProjectEntry {
+  name: string;      // e.g. "AI-Powered Course Manager (POC)"
+  techStack: string; // e.g. "Next.js, Cursor, Copilot, RAG Models"
+  dateRange: string; // e.g. "May 2025 -- Present"
+  bullets: string[];
+}
+
+export interface TechnicalSkills {
+  // store ONLY the text after the colon for each line
+  languagesAndTools: string; // "Java, C, C++, ..."
+  dataAnalysis: string;      // "Quantitative Analysis, ..."
+  other: string;             // "Teaching/Coaching, ..."
+}
+
+export interface ResumeData {
+  fullName: string;
+  phone: string;
+  email: string;
+  emailHref?: string;     // defaults to email if omitted
+  headerLocation?: string; // e.g. "Saratoga, CA 95070"
+  linkedinUrl?: string;
+  linkedinLabel?: string; // defaults to linkedinUrl if omitted
+  githubUrl?: string;
+  githubLabel?: string;   // defaults to githubUrl if omitted
+  education: EducationEntry[];
+  experience: ExperienceEntry[];
+  projects: ProjectEntry[];
+  skills: TechnicalSkills;
+}
+
+/**
+ * Escape LaTeX special characters in text content.
+ */
+function escapeLatex(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/\\/g, "\\textbackslash{}")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\$/g, "\\$")
+    .replace(/&/g, "{\\&}")
+    .replace(/#/g, "\\#")
+    .replace(/_/g, "\\_")
+    .replace(/%/g, "\\%")
+    .replace(/~/g, "\\textasciitilde{}")
+    .replace(/\^/g, "\\textasciicircum{}");
+}
+
+/**
+ * Generate LaTeX for a resume in Jake-style layout that matches your original.
+ */
+export function generateResumeLatex(data: ResumeData): string {
+  const emailHref = data.emailHref ?? data.email;
+
+  const linkedinBlock = data.linkedinUrl
+    ? ` $|$ \\href{${data.linkedinUrl}}{\\underline{${escapeLatex(
+        data.linkedinLabel ?? data.linkedinUrl.replace(/^https?:\/\//, "")
+      )}}}`
+    : "";
+
+  const githubBlock = data.githubUrl
+    ? ` $|$ \\href{${data.githubUrl}}{\\underline{${escapeLatex(
+        data.githubLabel ?? data.githubUrl.replace(/^https?:\/\//, "")
+      )}}}`
+    : "";
+
+  // ---------- EDUCATION ----------
+  const educationBlock = data.education
+    .map((e) => {
+      const bullets =
+        e.bullets && e.bullets.length
+          ? `
+      \\resumeItemListStart
+${e.bullets
+  .map((b) => `        \\resumeItem{${escapeLatex(b)}}`)
+  .join("\n")}
+      \\resumeItemListEnd`
+          : "";
+
+      // Match original order: {School}{Dates}{Degree}{Location}
+      return `
+    \\resumeSubheading
+      {${escapeLatex(e.institution)}}{${escapeLatex(e.dateRange)}}
+      {${escapeLatex(e.degree)}}{${escapeLatex(e.location)}}${bullets}`;
+    })
+    .join("\n\n");
+
+  const educationSection =
+    data.education && data.education.length > 0
+      ? `\\section{Education}
+  \\resumeSubHeadingListStart${educationBlock}
+  \\resumeSubHeadingListEnd`
+      : "";
+
+  // ---------- EXPERIENCE ----------
+  const experienceBlock = data.experience
+    .map((exp) => {
+      const bullets =
+        exp.bullets && exp.bullets.length
+          ? `
+      \\resumeItemListStart
+${exp.bullets
+  .map((b) => `        \\resumeItem{${escapeLatex(b)}}`)
+  .join("\n")}
+      \\resumeItemListEnd`
+          : "";
+
+      return `
+    \\resumeSubheading
+      {${escapeLatex(exp.title)}}{${escapeLatex(exp.dateRange)}}
+      {${escapeLatex(exp.company)}}{${escapeLatex(exp.location)}}${bullets}`;
+    })
+    .join("\n\n");
+
+  const experienceSection =
+    data.experience && data.experience.length > 0
+      ? `\\section{Experience}
+  \\resumeSubHeadingListStart
+${experienceBlock}
+  \\resumeSubHeadingListEnd`
+      : "";
+
+  // ---------- PROJECTS ----------
+  const projectsBlock = data.projects
+    .map((p) => {
+      const bullets =
+        p.bullets && p.bullets.length
+          ? `
+      \\resumeItemListStart
+${p.bullets
+  .map((b) => `        \\resumeItem{${escapeLatex(b)}}`)
+  .join("\n")}
+      \\resumeItemListEnd`
+          : "";
+
+      return `
+    \\resumeProjectHeading
+      {\\textbf{${escapeLatex(p.name)}} $|$ \\emph{${escapeLatex(
+        p.techStack
+      )}}}{${escapeLatex(p.dateRange)}}${bullets}`;
+    })
+    .join("\n\n");
+
+  const projectsSection =
+    data.projects && data.projects.length > 0
+      ? `\\section{Projects}
+  \\resumeSubHeadingListStart
+${projectsBlock}
+  \\resumeSubHeadingListEnd`
+      : "";
+
+  // ---------- FINAL DOCUMENT ----------
+  return `
+%-------------------------
+% Resume in Latex (Template)
+% Generated by generateResumeLatex
+%------------------------
+
+\\documentclass[letterpaper,11pt]{article}
+
+\\usepackage{latexsym}
+\\usepackage[empty]{fullpage}
+\\usepackage{titlesec}
+\\usepackage{marvosym}
+\\usepackage[usenames,dvipsnames]{color}
+\\usepackage{verbatim}
+\\usepackage{enumitem}
+\\usepackage[hidelinks]{hyperref}
+\\usepackage{fancyhdr}
+\\usepackage[english]{babel}
+\\usepackage{tabularx}
+\\input{glyphtounicode}
+
+\\pagestyle{fancy}
+\\fancyhf{}
+\\fancyfoot{}
+\\renewcommand{\\headrulewidth}{0pt}
+\\renewcommand{\\footrulewidth}{0pt}
+
+% Adjust margins
+\\addtolength{\\oddsidemargin}{-0.5in}
+\\addtolength{\\evensidemargin}{-0.5in}
+\\addtolength{\\textwidth}{1in}
+\\addtolength{\\topmargin}{-.5in}
+\\addtolength{\\textheight}{1.0in}
+
+\\urlstyle{same}
+
+\\raggedbottom
+\\raggedright
+\\setlength{\\tabcolsep}{0in}
+
+% Sections formatting
+\\titleformat{\\section}{
+  \\vspace{-4pt}\\scshape\\raggedright\\large
+}{}{0em}{}[\\color{black}\\titlerule \\vspace{-5pt}]
+
+% Ensure ATS/machine readable
+\\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\\newcommand{\\resumeItem}[1]{
+  \\item\\small{
+    {#1 \\vspace{-2pt}}
+  }
+}
+
+\\newcommand{\\resumeSubheading}[4]{
+  \\vspace{-2pt}\\item
+    \\begin{tabular*}{0.97\\textwidth}[t]{l@{\\extracolsep{\\fill}}r}
+      \\textbf{#1} & #2 \\\\
+      \\textit{\\small#3} & \\textit{\\small #4} \\\\
+    \\end{tabular*}\\vspace{-7pt}
+}
+
+\\newcommand{\\resumeProjectHeading}[2]{
+    \\item
+    \\begin{tabular*}{0.97\\textwidth}{l@{\\extracolsep{\\fill}}r}
+      \\small#1 & #2 \\\\
+    \\end{tabular*}\\vspace{-7pt}
+}
+
+\\newcommand{\\resumeSubItem}[1]{\\resumeItem{#1}\\vspace{-4pt}}
+
+\\renewcommand\\labelitemii{$\\vcenter{\\hbox{\\tiny$\\bullet$}}$}
+
+\\newcommand{\\resumeSubHeadingListStart}{\\begin{itemize}[leftmargin=0.15in, label={}]}
+\\newcommand{\\resumeSubHeadingListEnd}{\\end{itemize}}
+\\newcommand{\\resumeItemListStart}{\\begin{itemize}}
+\\newcommand{\\resumeItemListEnd}{\\end{itemize}\\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\\begin{document}
+
+%----------HEADING----------
+\\begin{center}
+    {\\Huge \\scshape ${escapeLatex(data.fullName)}} \\\\ \\vspace{1pt}
+    \\small ${escapeLatex(
+      data.phone
+    )} $|$ \\href{mailto:${emailHref}}{\\underline{${escapeLatex(
+    data.email
+  )}}}${linkedinBlock}${githubBlock}\\\\
+    ${escapeLatex(data.headerLocation ?? "")}
+\\end{center}
+
+${educationSection}
+
+${experienceSection}
+
+${projectsSection}
+
+%-----------TECHNICAL SKILLS-----------
+\\section{Technical Skills}
+ \\begin{itemize}[leftmargin=0.15in, label={}]
+    \\small{\\item{
+     \\textbf{Languages \\& Tools}{: ${escapeLatex(
+       data.skills.languagesAndTools
+     )}} \\\\
+     \\textbf{Data/Analysis}{: ${escapeLatex(
+       data.skills.dataAnalysis
+     )}} \\\\
+     \\textbf{Other}{: ${escapeLatex(
+       data.skills.other
+     )}}
+    }}
+ \\end{itemize}
+
+%-------------------------------------------
+\\end{document}
+`;
+}

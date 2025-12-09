@@ -6,7 +6,7 @@
 
 import { supabase } from "./supabase/client";
 
-export type OnboardingPhase = "profile" | "dashboard" | "job-creation" | "job-detail" | "completed";
+export type OnboardingPhase = "profile" | "dashboard" | "job-creation" | "job-detail" | "resume-optimizer" | "completed";
 
 export type OnboardingState = {
   phase: OnboardingPhase;
@@ -97,7 +97,7 @@ export async function clearOnboardingState(): Promise<void> {
       .update({
         onboarding_phase: "completed",
         onboarding_step: 0,
-        onboarding_completed_phases: ["profile", "dashboard", "job-creation", "job-detail", "completed"],
+        onboarding_completed_phases: ["profile", "dashboard", "job-creation", "job-detail", "resume-optimizer", "completed"],
         onboarding_job_id: null,
       })
       .eq("id", user.id);

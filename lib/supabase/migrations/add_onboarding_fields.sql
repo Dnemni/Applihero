@@ -2,7 +2,7 @@
 -- This allows storing onboarding progress in the database instead of localStorage
 
 ALTER TABLE profiles 
-ADD COLUMN IF NOT EXISTS onboarding_phase TEXT DEFAULT 'profile' CHECK (onboarding_phase IN ('profile', 'dashboard', 'job-creation', 'job-detail', 'completed')),
+ADD COLUMN IF NOT EXISTS onboarding_phase TEXT DEFAULT 'profile' CHECK (onboarding_phase IN ('profile', 'dashboard', 'job-creation', 'job-detail', 'resume-optimizer', 'completed')),
 ADD COLUMN IF NOT EXISTS onboarding_step INTEGER DEFAULT 0,
 ADD COLUMN IF NOT EXISTS onboarding_completed_phases TEXT[] DEFAULT '{}',
 ADD COLUMN IF NOT EXISTS onboarding_job_id UUID REFERENCES jobs(id) ON DELETE SET NULL;

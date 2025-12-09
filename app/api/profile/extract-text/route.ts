@@ -55,13 +55,21 @@ export async function POST(req: NextRequest) {
 
     const payload = JSON.parse(Buffer.concat(outChunks).toString('utf8')) as {
       pages: Array<{ content: Array<{ str: string }> }>;
+      text: string;
     };
 
-    // Combine text from all pages
-    const extractedText = (payload.pages || [])
-      .map((page) => (page.content || []).map((item) => item.str).join(' '))
-      .join('\n\n')
-      .trim();
+    // Use pre-processed text that preserves line breaks
+    let extractedText = payload.text || '';
+    
+    // If text is empty, fallback to combining from pages
+    if (!extractedText) {
+      extractedText = (payload.pages || [])
+        .map((page) => (page.content || []).map((item) => item.str).join(' '))
+        .join('\n\n')
+        .trim();
+    }
+
+    extractedText = extractedText.trim();
 
     if (!extractedText) {
       return NextResponse.json({ error: 'Could not extract text from PDF' }, { status: 400 });

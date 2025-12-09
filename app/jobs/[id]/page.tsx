@@ -98,8 +98,8 @@ export default function JobPage({ params }: { params: { id: string } }) {
       position: "bottom",
     },
     {
-      title: "You're All Set! 🎉",
-      description: "Congratulations! You now know how to use Applihero. Add questions, draft answers, generate cover letters, add referrals, chat with the AI for help, request feedback, and iterate. When ready, click 'Submit Application' at the top. You've got this! 🚀",
+      title: "Job Workspace Complete! ✅",
+      description: "You've explored the job workspace and learned how to use AI coaching, draft answers, generate cover letters, and add referrals. Next, let's optimize your resume for this job! Click 'Finish' to continue to the Resume Optimizer.",
       position: "center",
     },
   ];
@@ -305,8 +305,18 @@ export default function JobPage({ params }: { params: { id: string } }) {
 
   async function handleOnboardingComplete() {
     setShowOnboarding(false);
-    // Complete onboarding and mark user as fully onboarded
-    await completeFullOnboarding();
+    // Set onboarding_phase to 'resume-optimizer' before redirect
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await ProfileService.updateProfile({
+          onboarding_phase: 'resume-optimizer',
+        });
+      }
+    } catch (error) {
+      console.error("Failed to update onboarding phase for resume-optimizer:", error);
+    }
+    router.push("/resume-optimizer");
   }
 
   async function completeFullOnboarding() {

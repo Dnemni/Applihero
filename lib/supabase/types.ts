@@ -33,6 +33,7 @@ export interface Database {
           active: boolean;
           created_at: string;
           updated_at: string;
+          onboarding_phase: string | null;
         };
         Insert: {
           id: string;
@@ -50,6 +51,7 @@ export interface Database {
           active?: boolean;
           created_at?: string;
           updated_at?: string;
+          onboarding_phase?: string | null;
         };
         Update: {
           id?: string;
@@ -67,6 +69,7 @@ export interface Database {
           active?: boolean;
           created_at?: string;
           updated_at?: string;
+          onboarding_phase?: string | null;
         };
       };
       jobs: {
@@ -197,6 +200,50 @@ export interface Database {
           updated_at?: string;
         };
       };
+      resume_versions: {
+        Row: {
+          id: string;
+          job_id: string;
+          user_id: string;
+          original_text: string;
+          optimized_text: string;
+          original_file_url: string | null;
+          current_url: string | null;
+          feedback_score: number | null;
+          feedback_text: any | null;
+          latex_code: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          user_id: string;
+          original_text: string;
+          optimized_text: string;
+          original_file_url?: string | null;
+          current_url?: string | null;
+          feedback_score?: number | null;
+          feedback_text?: any | null;
+          latex_code?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          job_id?: string;
+          user_id?: string;
+          original_text?: string;
+          optimized_text?: string;
+          original_file_url?: string | null;
+          current_url?: string | null;
+          feedback_score?: number | null;
+          feedback_text?: any | null;
+          latex_code?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
   };
 }
@@ -207,6 +254,7 @@ export type Job = Database['public']['Tables']['jobs']['Row'];
 export type Question = Database['public']['Tables']['questions']['Row'];
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row'];
 export type JobDocument = Database['public']['Tables']['job_documents']['Row'];
+export type ResumeVersion = Database['public']['Tables']['resume_versions']['Row'];
 
 // Types with relations
 export type JobWithQuestions = Job & {

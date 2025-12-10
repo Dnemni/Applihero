@@ -37,6 +37,8 @@ export default function ResumeOptimizerPage() {
   const [contentHash, setContentHash] = useState<string>("");
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showJobInfoModal, setShowJobInfoModal] = useState(false);
+  const [selectedStyle, setSelectedStyle] = useState<string>("jake");
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
   const onboardingSteps: OnboardingStep[] = [
     {
@@ -370,6 +372,25 @@ export default function ResumeOptimizerPage() {
       });
 
       // 1. Generate LaTeX using LLM API
+      // IMPORTANT: The LLM MUST NOT change any actual wording from newText.
+      // It may only change layout/ordering/sectioning to match the chosen style.
+      let styleHint = "Use Jake's original resume style and layout, preserving the same overall structure and typography as the existing Jake template while keeping every word from NEW_CONTENT unchanged.";
+
+      if (selectedStyle === "jake") {
+        styleHint = "Use Jake's original resume style and layout, preserving the same overall structure and typography as the existing Jake template while keeping every word from NEW_CONTENT unchanged.";
+      } else if (selectedStyle === "modern") {
+        styleHint = "Use a clean, modern tech resume style with clear section headings, strong hierarchy, and generous white space. Keep all wording from NEW_CONTENT exactly the same, but you may reorganize sections and bullets to feel modern and scannable for tech recruiters.";
+      } else if (selectedStyle === "classic") {
+        styleHint = "Use a classic professional resume style similar to traditional corporate resumes, with conservative typography, clear section dividers, and minimal graphic elements. Do not change any wording from NEW_CONTENT; only adjust formatting and ordering to fit this classic style.";
+      } else if (selectedStyle === "onepage") {
+        styleHint = "Ensure the resume fits cleanly on a single US letter page with tight but readable spacing. You may shorten spacing, adjust section ordering, and rebalance line breaks, but you must not change any of the actual words or sentences from NEW_CONTENT.";
+      } else if (selectedStyle === "chronological") {
+        styleHint = "Use a chronological resume format that clearly lists work experience in reverse chronological order with aligned dates, job titles, company names, and concise bullet points. Keep all wording from NEW_CONTENT exactly the same while restructuring sections to emphasize the work history timeline.";
+      } else if (selectedStyle === "functional") {
+        styleHint = "Use a functional resume format that emphasizes skills and qualifications grouped by theme at the top, with work history de-emphasized and summarized in a brief list later. Preserve every word from NEW_CONTENT, only reorganizing which sentences and bullets appear under which section.";
+      } else if (selectedStyle === "combination") {
+        styleHint = "Use a combination resume format that starts with a strong skills/qualifications summary section, followed by a detailed reverse-chronological work history section. All wording from NEW_CONTENT must remain identical; only section grouping, ordering, and LaTeX structure should change.";
+      }
       const llmResponse = await fetch("/api/resume/generate-latex-llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -377,7 +398,7 @@ export default function ResumeOptimizerPage() {
           oldLatex: undefined,
           oldPdfUrl: resumeFileUrl,
           newText: resumeText,
-          styleHint: "Use Jake's resume style",
+          styleHint,
         }),
       });
       if (!llmResponse.ok) throw new Error("Failed to generate LaTeX");
@@ -432,8 +453,30 @@ export default function ResumeOptimizerPage() {
         }),
       });
       if (response.ok) {
-        const data = await response.json();
+        await response.json();
         setResumeFileUrl(signedData.signedUrl);
+
+        // After saving, update the editor text to better reflect the
+        // formatting/line breaks used in the final PDF. This uses the
+        // existing extract-text.cjs script locally; in production you
+        // would likely run this as a background job using the stored
+        // PDF path.
+        try {
+          const pdfText = await fetch("/api/resume/extract-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pdfUrl: signedData.signedUrl }),
+          });
+          if (pdfText.ok) {
+            const { text } = await pdfText.json();
+            if (text && typeof text === "string") {
+              setResumeText(text);
+            }
+          }
+        } catch (extractError) {
+          console.error("Error extracting text from generated PDF:", extractError);
+        }
+
         toast.success("Resume version saved!");
       } else {
         toast.error("Failed to save resume version");
@@ -627,6 +670,29 @@ export default function ResumeOptimizerPage() {
           {/* Main Content Area */}
           <div className="col-span-9">
             <div className="space-y-6">
+              {/* PDF Style Selector */}
+              <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-700 tracking-wide uppercase">PDF Style</p>
+                  <p className="text-xs text-gray-500 mt-1">Choose how your generated PDF should look before saving a new version.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={selectedStyle}
+                    onChange={(e) => setSelectedStyle(e.target.value)}
+                    className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="jake">Jake (Default)</option>
+                    <option value="modern">Modern Tech</option>
+                    <option value="classic">Classic Professional</option>
+                    <option value="onepage">One-Page Focused</option>
+                    <option value="chronological">Chronological</option>
+                    <option value="functional">Functional</option>
+                    <option value="combination">Combination</option>
+                  </select>
+                </div>
+              </div>
+
               {/* PDF Viewer */}
               <div id="pdf-viewer" className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-200 bg-gray-50">
@@ -672,10 +738,10 @@ export default function ResumeOptimizerPage() {
               <div id="resume-editor" className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-gray-900">Edit Resume Text</h3>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500">{resumeText.split('\n').length} lines</span>
-                    <span className="text-xs text-gray-500">•</span>
-                    <span className="text-xs text-gray-500">{resumeText.length} characters</span>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>{resumeText.split('\n').length} lines</span>
+                    <span>•</span>
+                    <span>{resumeText.length} characters</span>
                   </div>
                 </div>
                 <div className="p-4">
@@ -711,7 +777,7 @@ export default function ResumeOptimizerPage() {
                   {loadingFeedback ? "Generating..." : "Request Feedback"}
                 </button>
                 <button
-                  onClick={saveOptimizedResume}
+                  onClick={() => setShowSaveConfirm(true)}
                   disabled={isSaving || !selectedJobId}
                   className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
@@ -941,6 +1007,62 @@ export default function ResumeOptimizerPage() {
                 className="w-full px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Confirmation Modal */}
+      {showSaveConfirm && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4"
+          onClick={() => setShowSaveConfirm(false)}
+        >
+          <div
+            className="max-w-md w-full bg-white rounded-2xl shadow-2xl border border-indigo-200 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="mt-0.5 w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-base font-bold">
+                !
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Confirm PDF layout</p>
+                <p className="text-xs text-gray-600 mt-1">
+                  You are generating this PDF as a
+                  {" "}
+                  <span className="font-semibold text-indigo-600">
+                    {selectedStyle === "jake" && "Jake"}
+                    {selectedStyle === "modern" && "Modern Tech"}
+                    {selectedStyle === "classic" && "Classic Professional"}
+                    {selectedStyle === "onepage" && "One-Page"}
+                    {selectedStyle === "chronological" && "Chronological"}
+                    {selectedStyle === "functional" && "Functional"}
+                    {selectedStyle === "combination" && "Combination"}
+                  </span>{" "}
+                  layout. This only changes formatting, not your actual content.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSaveConfirm(false)}
+                className="px-3 py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg border border-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowSaveConfirm(false);
+                  await saveOptimizedResume();
+                }}
+                className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 shadow-sm"
+                disabled={isSaving}
+              >
+                {isSaving ? "Saving..." : "Confirm & Save"}
               </button>
             </div>
           </div>

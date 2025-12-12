@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.86.0",
+    "@vercel/analytics": "^1.6.1",
     "canvas": "^3.2.0",
     "jspdf": "^2.5.2",
     "lucide-react": "^0.555.0",

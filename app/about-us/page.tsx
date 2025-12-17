@@ -25,7 +25,7 @@ const teamMembers: TeamMember[] = [
     },
     {
         name: "Dhruv Nemani",
-        linkedin: "https://linkedin.com/in/dhruvnemani",
+        linkedin: "https://linkedin.com/in/dhruv-nemani",
         github: "https://github.com/Dnemni",
         hobbies: ["Reading", "Traveling", "Cooking", "Yoga"],
         degree: "B.S. Computer Science, Purdue University",

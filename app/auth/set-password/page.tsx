@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent, useEffect } from "react";
+import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
@@ -58,8 +59,9 @@ export default function SetPasswordPage() {
       return;
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    const { valid, reasons } = getPasswordStrength(password);
+    if (!valid) {
+      setError("Password is not strong enough: " + reasons.join(", "));
       return;
     }
 
@@ -160,11 +162,16 @@ export default function SetPasswordPage() {
                   disabled={loading}
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="••••••••"
-                  minLength={6}
+                  minLength={8}
+                  autoComplete="new-password"
                 />
-                <p className="mt-1 text-xs text-gray-500">
-                  Must be at least 6 characters
-                </p>
+                <PasswordStrengthBar password={password} />
+                <ul className="mt-2 text-xs text-gray-500 space-y-0.5">
+                  <li>• At least 8 characters</li>
+                  <li>• At least one uppercase letter</li>
+                  <li>• At least one number</li>
+                  <li>• At least one special character</li>
+                </ul>
               </div>
 
               <div>
@@ -179,7 +186,8 @@ export default function SetPasswordPage() {
                   disabled={loading}
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="••••••••"
-                  minLength={6}
+                  minLength={8}
+                  autoComplete="new-password"
                 />
               </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent } from "react";
+import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
@@ -23,13 +24,15 @@ export default function SignupPage() {
     setError(null);
 
     // Validation
+
     if (password !== confirmPassword) {
       setError("Passwords do not match");
       return;
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    const { valid, reasons } = getPasswordStrength(password);
+    if (!valid) {
+      setError("Password is not strong enough: " + reasons.join(", "));
       return;
     }
 
@@ -241,11 +244,19 @@ export default function SignupPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     disabled={loading}
                     className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="••••••••"
+                    autoComplete="new-password"
                   />
+                  <PasswordStrengthBar password={password} />
+                  <ul className="mt-2 text-xs text-gray-500 space-y-0.5">
+                    <li>• At least 8 characters</li>
+                    <li>• At least one uppercase letter</li>
+                    <li>• At least one number</li>
+                    <li>• At least one special character</li>
+                  </ul>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Confirm password</label>
@@ -254,10 +265,11 @@ export default function SignupPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     disabled={loading}
                     className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="••••••••"
+                    autoComplete="new-password"
                   />
                 </div>
                 <button

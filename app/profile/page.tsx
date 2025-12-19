@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -8,6 +9,7 @@ import type { Profile } from "@/lib/supabase/types";
 import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overlay";
 import { Header } from "@/components/header";
 import { toast } from "@/components/toast";
+import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
 import {
   getOnboardingState,
   setOnboardingState,
@@ -225,8 +227,9 @@ export default function ProfilePage() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      setPasswordError("New password must be at least 6 characters");
+    const { valid, reasons } = getPasswordStrength(newPassword);
+    if (!valid) {
+      setPasswordError("Password is not strong enough: " + reasons.join(", "));
       return;
     }
 
@@ -947,10 +950,17 @@ export default function ProfilePage() {
                   onChange={(e) => setNewPassword(e.target.value)}
                   disabled={changingPassword || passwordSuccess}
                   placeholder="Enter new password"
-                  minLength={6}
+                  minLength={8}
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
-                <p className="mt-1 text-xs text-gray-500">Must be at least 6 characters</p>
+                <PasswordStrengthBar password={newPassword} />
+                {newPassword && !getPasswordStrength(newPassword).valid && (
+                  <ul className="mt-1 text-xs text-red-500 list-disc list-inside">
+                    {getPasswordStrength(newPassword).reasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
               <div>
@@ -963,7 +973,7 @@ export default function ProfilePage() {
                   onChange={(e) => setConfirmNewPassword(e.target.value)}
                   disabled={changingPassword || passwordSuccess}
                   placeholder="Re-enter new password"
-                  minLength={6}
+                  minLength={8}
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !changingPassword && !passwordSuccess) {
@@ -971,6 +981,9 @@ export default function ProfilePage() {
                     }
                   }}
                 />
+                {confirmNewPassword && newPassword !== confirmNewPassword && (
+                  <p className="mt-1 text-xs text-red-500">Passwords do not match</p>
+                )}
               </div>
             </div>
 
@@ -991,7 +1004,15 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={handlePasswordChange}
-                disabled={changingPassword || passwordSuccess || !currentPassword || !newPassword || !confirmNewPassword}
+                disabled={
+                  changingPassword ||
+                  passwordSuccess ||
+                  !currentPassword ||
+                  !newPassword ||
+                  !confirmNewPassword ||
+                  newPassword !== confirmNewPassword ||
+                  !getPasswordStrength(newPassword).valid
+                }
                 className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {changingPassword && (

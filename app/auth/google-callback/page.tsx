@@ -41,8 +41,17 @@ export default function GoogleCallbackPage() {
 
         if (!tokenResponse.ok) {
           const errorData = await tokenResponse.json().catch(() => ({}));
-          console.error('Token exchange failed:', errorData);
-          throw new Error(errorData.error || 'Failed to exchange authorization code for tokens');
+          console.error('Token exchange failed:', {
+            status: tokenResponse.status,
+            statusText: tokenResponse.statusText,
+            errorData,
+            codeSnippet: code?.substring(0, 20) + '...',
+          });
+          throw new Error(
+            errorData.googleError 
+              ? `Google OAuth error: ${errorData.googleError}`
+              : errorData.error || 'Failed to exchange authorization code for tokens'
+          );
         }
 
         const { idToken, accessToken } = await tokenResponse.json();

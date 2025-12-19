@@ -15,13 +15,22 @@ export async function POST(request: NextRequest) {
     const { code, state } = await request.json();
 
     if (!code) {
+      console.error('No authorization code provided');
       return NextResponse.json(
         { error: 'Authorization code is required' },
         { status: 400 }
       );
     }
 
-    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/google-callback`;
+    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000'}/auth/google-callback`;
+    
+    console.log('Token exchange attempt:', {
+      hasCode: !!code,
+      codeLength: code?.length,
+      redirectUri,
+      clientIdPresent: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+      clientSecretPresent: !!process.env.GOOGLE_CLIENT_SECRET,
+    });
 
     // Exchange authorization code for tokens
     const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
@@ -45,11 +54,15 @@ export async function POST(request: NextRequest) {
         statusText: tokenResponse.statusText,
         error: error,
         redirectUri: redirectUri,
+        parsedError: (() => {
+          try { return JSON.parse(error); } catch { return error; }
+        })(),
       });
       return NextResponse.json(
         { 
           error: 'Failed to exchange authorization code for tokens',
-          details: tokenResponse.statusText 
+          details: tokenResponse.statusText,
+          googleError: error
         },
         { status: 400 }
       );

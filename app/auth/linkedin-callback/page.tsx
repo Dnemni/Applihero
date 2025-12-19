@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { getStoredOAuthState, clearOAuthState } from '@/lib/google-oauth';
+import { getStoredLinkedInOAuthState, clearLinkedInOAuthState } from '@/lib/linkedin-oauth';
 import { ProfileService } from '@/lib/supabase/services';
 import { initializeOnboarding } from '@/lib/onboarding-state';
 
-export default function GoogleCallbackPage() {
+export default function LinkedInCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -20,17 +20,17 @@ export default function GoogleCallbackPage() {
         const returnedState = searchParams.get('state');
 
         if (!code) {
-          throw new Error('No authorization code received from Google');
+          throw new Error('No authorization code received from LinkedIn');
         }
 
         // Verify state parameter (CSRF protection)
-        const storedState = getStoredOAuthState();
+        const storedState = getStoredLinkedInOAuthState();
         if (returnedState !== storedState) {
           throw new Error('State mismatch - possible CSRF attack');
         }
 
-        // Exchange authorization code for tokens (server-side)
-        const tokenResponse = await fetch('/api/auth/google-token', {
+        // Exchange authorization code for tokens and user info (server-side)
+        const tokenResponse = await fetch('/api/auth/linkedin-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -48,27 +48,51 @@ export default function GoogleCallbackPage() {
             codeSnippet: code?.substring(0, 20) + '...',
           });
           throw new Error(
-            errorData.googleError 
-              ? `Google OAuth error: ${errorData.googleError}`
+            errorData.linkedinError 
+              ? `LinkedIn OAuth error: ${errorData.linkedinError}`
               : errorData.error || 'Failed to exchange authorization code for tokens'
           );
         }
 
-        const { idToken, accessToken } = await tokenResponse.json();
+        const { accessToken, userInfo } = await tokenResponse.json();
 
-        if (!idToken) {
-          throw new Error('No ID token received');
+        if (!userInfo || !userInfo.email) {
+          throw new Error('No user information received from LinkedIn');
         }
 
-        // Sign in to Supabase using the ID token from Google
-        const { data: authData, error: supabaseError } = await supabase.auth.signInWithIdToken({
-          provider: 'google',
-          token: idToken,
+        // Sign in or sign up with email/password using LinkedIn email
+        // First, try to sign in
+        let authData;
+        let isNewUser = false;
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: userInfo.email,
+          password: `linkedin_temp_${userInfo.sub}`, // Temporary password
         });
 
-        if (supabaseError) {
-          console.error('Supabase sign in error:', supabaseError);
-          throw supabaseError;
+        if (signInError) {
+          // User doesn't exist, create account
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: userInfo.email,
+            password: `linkedin_temp_${userInfo.sub}`,
+            options: {
+              data: {
+                first_name: userInfo.given_name || '',
+                last_name: userInfo.family_name || '',
+                full_name: userInfo.name || '',
+                linkedin_id: userInfo.sub,
+                avatar_url: userInfo.picture || '',
+                provider: 'linkedin',
+              },
+              emailRedirectTo: `${window.location.origin}/auth/callback`,
+            },
+          });
+
+          if (signUpError) throw signUpError;
+          authData = signUpData;
+          isNewUser = true;
+        } else {
+          authData = signInData;
         }
 
         if (!authData.user) {
@@ -78,58 +102,33 @@ export default function GoogleCallbackPage() {
         // No artificial wait; proceed immediately
 
         // Clear OAuth state from storage
-        clearOAuthState();
+        clearLinkedInOAuthState();
 
-        // Check if this is a new OAuth-only user
-        try {
-          const response = await fetch('/api/auth/check-identities', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: authData.user.id }),
-          });
-
-          if (response.ok) {
-            const identitiesData = await response.json();
-            console.log('User identities:', identitiesData);
-            
-            const hasEmailAuth = identitiesData.hasPassword;
-
-            console.log('Has email auth:', hasEmailAuth);
-
-            // If this is an OAuth-only user (no email/password auth), redirect to set password
-            if (!hasEmailAuth) {
-              console.log('OAuth-only user detected, redirecting to set-password');
-              
-              // Extract name from Google metadata
-              const name = authData.user.user_metadata?.full_name || authData.user.email?.split('@')[0] || 'User';
-              const [firstName, ...lastNameParts] = name.split(' ');
-              const lastName = lastNameParts.join(' ');
-
-              // Update profile with name and email
-              try {
-                await fetch('/api/profile/update-names', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    userId: authData.user.id,
-                    firstName,
-                    lastName,
-                    email: authData.user.email,
-                  }),
-                });
-              } catch (err) {
-                console.error('Error updating profile names:', err);
-              }
-
-              router.push('/auth/set-password?redirect=/profile');
-              return;
-            }
+        // Update profile with LinkedIn info
+        if (isNewUser || userInfo.picture) {
+          try {
+            await fetch('/api/profile/update-names', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: authData.user.id,
+                firstName: userInfo.given_name || '',
+                lastName: userInfo.family_name || '',
+                email: userInfo.email,
+              }),
+            });
+          } catch (err) {
+            console.error('Error updating profile names:', err);
           }
-        } catch (err) {
-          console.error('Error checking identities:', err);
         }
 
-        // For existing or non-OAuth users, proceed normally
+        // For new users, redirect to set-password
+        if (isNewUser) {
+          router.push('/auth/set-password?redirect=/profile&provider=linkedin');
+          return;
+        }
+
+        // For existing users, check onboarding status
         const profile = await ProfileService.getCurrentProfile();
         if (profile && !profile.onboarding_completed) {
           initializeOnboarding();

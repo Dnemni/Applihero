@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/client";
  */
 export async function POST(request: NextRequest) {
   try {
-    const { userId, firstName, lastName } = await request.json();
+    const { userId, firstName, lastName, email } = await request.json();
 
     if (!userId || !firstName || !lastName) {
       return NextResponse.json(
@@ -19,14 +19,22 @@ export async function POST(request: NextRequest) {
     // Wait a moment for the trigger to create the profile
     await new Promise(resolve => setTimeout(resolve, 1000));
 
+    // Build update object
+    const updateData: any = {
+      id: userId,
+      first_name: firstName,
+      last_name: lastName,
+    };
+
+    // Add email if provided
+    if (email) {
+      updateData.email = email;
+    }
+
     // Use admin client to update profile with name information
     const { error: profileError } = await (supabaseAdmin as any)
       .from("profiles")
-      .upsert({
-        id: userId,
-        first_name: firstName,
-        last_name: lastName,
-      } as any, {
+      .upsert(updateData, {
         onConflict: 'id',
         ignoreDuplicates: false,
       });

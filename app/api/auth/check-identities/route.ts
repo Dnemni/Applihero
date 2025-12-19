@@ -5,12 +5,19 @@ export async function POST(request: NextRequest) {
   try {
     const { userId } = await request.json();
 
+    console.log('Check identities request:', { userId });
+
     if (!userId) {
       return NextResponse.json(
         { error: 'User ID is required' },
         { status: 400 }
       );
     }
+
+    // Verify environment variables
+    const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const hasUrl = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
+    console.log('Environment check:', { hasServiceKey, hasUrl });
 
     // Create Supabase client with service role for admin operations
     const supabase = createClient(
@@ -24,21 +31,27 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Call the RPC function to get user identities
-    const { data, error } = await supabase.rpc('get_user_identities', {
-      p_user_id: userId,
-    });
+    // Get user data from auth.users table
+    const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
 
-    if (error) {
-      console.error('Error fetching identities:', error);
+    if (userError) {
+      console.error('Error fetching user:', userError);
       return NextResponse.json(
-        { error: 'Failed to fetch user identities' },
+        { error: 'Failed to fetch user data', details: userError },
         { status: 500 }
       );
     }
 
+    // Extract identity providers from user identities
+    const identityProviders = userData.user.identities?.map(identity => identity.provider) || [];
+    
+    console.log('User identities found:', identityProviders);
+
     return NextResponse.json({
-      identities: data,
+      identities: identityProviders,
+      hasPassword: identityProviders.includes('email'),
+      hasGoogle: identityProviders.includes('google'),
+      hasLinkedIn: identityProviders.includes('linkedin'),
     });
   } catch (error) {
     console.error('Check identities error:', error);

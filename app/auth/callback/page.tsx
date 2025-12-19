@@ -16,39 +16,58 @@ export default function AuthCallbackPage() {
                 const { data: { subscription } } = supabase.auth.onAuthStateChange(
                     async (event: any, session: any) => {
                         if (event === 'SIGNED_IN' && session?.user) {
-                            // Check if profile exists and handle onboarding for new OAuth users
                             try {
+                                // Wait a moment for the profile trigger to complete
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                
+                                // Check if user signed up with OAuth and doesn't have a password yet
+                                const { data: identities, error: identitiesError } = await supabase
+                                    .rpc('get_user_identities', { p_user_id: session.user.id });
+                                
+                                const hasOAuthOnly = !identitiesError && identities && 
+                                                   identities.some((i: any) => i.provider === 'google') && 
+                                                   !identities.some((i: any) => i.provider === 'email');
+                                
+                                // Get profile
                                 const profile = await ProfileService.getCurrentProfile();
                                 
-                                // If no profile exists or onboarding not completed, initialize it
-                                if (!profile || !profile.onboarding_completed) {
-                                    // For OAuth users, extract name from user metadata
+                                // For new OAuth users without password, redirect to set password first
+                                if (hasOAuthOnly && profile && !profile.onboarding_completed) {
+                                    // Extract name from OAuth metadata and update profile
                                     const fullName = session.user.user_metadata?.full_name || 
                                                    session.user.user_metadata?.name || '';
                                     const [firstName = '', lastName = ''] = fullName.split(' ');
                                     
-                                    // Update profile with OAuth metadata if available
-                                    if (profile && (firstName || lastName)) {
+                                    if (firstName || lastName) {
                                         await fetch('/api/profile/update-names', {
                                             method: 'POST',
                                             headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({
                                                 userId: session.user.id,
-                                                firstName: firstName || profile.first_name,
-                                                lastName: lastName || profile.last_name,
+                                                firstName: firstName,
+                                                lastName: lastName,
                                             }),
                                         });
                                     }
                                     
+                                    // Redirect to set password
+                                    router.push('/auth/set-password?redirect=/profile');
+                                    return;
+                                }
+                                
+                                // If no profile exists or onboarding not completed, go to profile
+                                if (!profile || !profile.onboarding_completed) {
                                     initializeOnboarding();
                                     router.push("/profile");
                                     return;
                                 }
+                                
+                                // Otherwise go to dashboard
+                                router.push("/dashboard");
                             } catch (profileError) {
-                                console.error('Error checking profile:', profileError);
+                                console.error('Error in OAuth callback:', profileError);
+                                router.push("/dashboard");
                             }
-                            
-                            router.push("/dashboard");
                         } else if (event === 'SIGNED_OUT') {
                             router.push("/login");
                         }
@@ -66,7 +85,42 @@ export default function AuthCallbackPage() {
                 if (session?.user) {
                     // Check profile and redirect appropriately
                     try {
+                        // Wait a moment for profile trigger
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                        // Check if OAuth-only user
+                        const { data: identities } = await supabase
+                            .rpc('get_user_identities', { p_user_id: session.user.id });
+                        
+                        const hasOAuthOnly = identities && 
+                                           identities.some((i: any) => i.provider === 'google') && 
+                                           !identities.some((i: any) => i.provider === 'email');
+                        
                         const profile = await ProfileService.getCurrentProfile();
+                        
+                        // Redirect OAuth-only new users to set password
+                        if (hasOAuthOnly && profile && !profile.onboarding_completed) {
+                            // Extract and save name
+                            const fullName = session.user.user_metadata?.full_name || 
+                                           session.user.user_metadata?.name || '';
+                            const [firstName = '', lastName = ''] = fullName.split(' ');
+                            
+                            if (firstName || lastName) {
+                                await fetch('/api/profile/update-names', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        userId: session.user.id,
+                                        firstName,
+                                        lastName,
+                                    }),
+                                });
+                            }
+                            
+                            router.push('/auth/set-password?redirect=/profile');
+                            return;
+                        }
+                        
                         if (!profile || !profile.onboarding_completed) {
                             initializeOnboarding();
                             router.push("/profile");
@@ -74,6 +128,7 @@ export default function AuthCallbackPage() {
                             router.push("/dashboard");
                         }
                     } catch (profileError) {
+                        console.error('Error in fallback check:', profileError);
                         // If profile check fails, still go to dashboard
                         router.push("/dashboard");
                     }

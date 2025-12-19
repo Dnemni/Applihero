@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
@@ -14,6 +14,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Check for success messages from URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('reset') === 'success') {
+      setSuccessMessage('Password reset successful! You can now sign in with your new password.');
+    }
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -113,6 +122,11 @@ export default function LoginPage() {
           </div>
 
           <div className="rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl p-8 border border-gray-100">
+            {successMessage && (
+              <div className="mb-4 rounded-lg bg-green-50 border border-green-200 p-3">
+                <p className="text-sm text-green-800">{successMessage}</p>
+              </div>
+            )}
             {error && (
               <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3">
                 <p className="text-sm text-red-800">{error}</p>
@@ -155,7 +169,7 @@ export default function LoginPage() {
                   />
                   <span className="ml-2 text-gray-600">Remember me (6 hours)</span>
                 </label>
-                <a href="#" className="text-indigo-600 hover:text-indigo-700 font-medium">Forgot password?</a>
+                <a href="/forgot-password" className="text-indigo-600 hover:text-indigo-700 font-medium">Forgot password?</a>
               </div>
               <button
                 type="submit"

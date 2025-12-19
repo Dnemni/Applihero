@@ -302,11 +302,11 @@ const ctx = await retrieveContext({
 
 // Generate personalized response
 const response = await openai.create({
-  model: "gpt-4o-mini",
+  model: "Applihero Career Coach RAG",
   messages: [
     {
       role: "system",
-      content: "Career coach using RAG"
+      content: "Dhruv Nemani's Personal Career Coach and Advisor"
     },
     {
       role: "user", 
@@ -523,7 +523,7 @@ const response = await openai.create({
                 </div>
               </div>
             </div>
-            
+
             {/* Dhilon Prasad */}
             <div className="rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-xl p-6 shadow-xl hover:shadow-2xl hover:border-indigo-300 transition-all duration-200">
               <div className="mb-4">

@@ -615,6 +615,7 @@ const response = await openai.create({
                 <li><button onClick={() => scrollToSection('how-it-works')} className="hover:text-white transition-colors">How it Works</button></li>
                 <li><button onClick={() => scrollToSection('about')} className="hover:text-white transition-colors">About Us</button></li>
                 <li><a href="/dashboard" className="hover:text-white transition-colors">Dashboard</a></li>
+                <li><a href="/privacy-policy" className="hover:text-white transition-colors">Privacy Policy</a></li>
               </ul>
             </div>
 

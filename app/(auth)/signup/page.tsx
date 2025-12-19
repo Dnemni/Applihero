@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
 import { initializeOnboarding } from "@/lib/onboarding-state";
+import { getGoogleOAuthURL, generateState, storeOAuthState } from "@/lib/google-oauth";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -93,19 +94,17 @@ export default function SignupPage() {
     setGoogleLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        },
-      });
-
-      if (error) throw error;
-      // The redirect will happen automatically
+      // Generate state for CSRF protection
+      const state = generateState();
+      
+      // Store state in sessionStorage
+      storeOAuthState(state);
+      
+      // Get Google OAuth URL
+      const googleOAuthURL = getGoogleOAuthURL(state);
+      
+      // Redirect to Google OAuth
+      window.location.href = googleOAuthURL;
     } catch (err: any) {
       setError(err.message || "Failed to sign up with Google");
       setGoogleLoading(false);

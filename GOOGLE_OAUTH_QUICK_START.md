@@ -6,10 +6,7 @@
 
 Check that `.env.local` has these variables:
 
-```env
-NEXT_PUBLIC_GOOGLE_CLIENT_ID="307947012696-vopr5kv93s5pcu4b32g4pdldfobfuutu.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET="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"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
+```env.local
 ```
 
 ✅ These are already in your `.env.local`

@@ -76,11 +76,6 @@ https://your-domain.com/auth/google-callback
 
 Based on your existing credentials:
 
-```
-Client ID: 307947012696-vopr5kv93s5pcu4b32g4pdldfobfuutu.apps.googleusercontent.com
-Client Secret: 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
-```
-
 ### What's Already Configured ✅
 
 If these URLs are NOT yet in your Google Console, add them:
@@ -180,18 +175,6 @@ Before testing, verify in Google Console:
 
 In `.env.local`:
 
-```env
-# ✅ These match your Google Console credentials
-NEXT_PUBLIC_GOOGLE_CLIENT_ID="307947012696-vopr5kv93s5pcu4b32g4pdldfobfuutu.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET="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"
-
-# ✅ Local development
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-
-# 🔄 For production, change to:
-# NEXT_PUBLIC_APP_URL="https://your-domain.com"
-```
-
 ---
 
 ## What Happens During OAuth
@@ -226,8 +209,8 @@ If you see a different URL or error, the redirect URI is wrong in Google Console
 Check the initial redirect to Google - it should show:
 ```
 https://accounts.google.com/o/oauth2/v2/auth?
-  client_id=307947012696-vopr5kv93s5pcu4b32g4pdldfobfuutu.apps.googleusercontent.com
-  redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fgoogle-callback
+  client_id=
+  redirect_uri=
   ...
 ```
 

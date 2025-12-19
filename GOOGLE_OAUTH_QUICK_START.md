@@ -69,11 +69,7 @@ Check these flows:
 
 When deploying to production, update:
 
-```env
-NEXT_PUBLIC_APP_URL="https://your-domain.com"
-NEXT_PUBLIC_GOOGLE_CLIENT_ID="YOUR_CLIENT_ID"
-GOOGLE_CLIENT_SECRET="YOUR_CLIENT_SECRET"
-```
+env.local
 
 ### Step 2: Update Google Cloud Console
 

@@ -54,12 +54,6 @@ You now have a **production-ready custom Google OAuth flow** that gives you full
 
 Add to `.env.local`:
 
-```env
-NEXT_PUBLIC_GOOGLE_CLIENT_ID="307947012696-vopr5kv93s5pcu4b32g4pdldfobfuutu.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET="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"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-```
-
 For production, update `NEXT_PUBLIC_APP_URL` and ensure redirect URIs are configured in Google Cloud Console.
 
 ## Google Cloud Console Configuration Required

@@ -10,6 +10,14 @@ export async function GET(req: NextRequest) {
   if (userError || !user) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
+  type LinkedInProfile = {
+    linkedin_id: string | null;
+    linkedin_name?: string;
+    linkedin_headline?: string;
+    linkedin_avatar_url?: string;
+    linkedin_connected_at?: string;
+    linkedin_raw?: any;
+  };
 
   const { data, error } = await supabase
     .from('profiles')
@@ -17,7 +25,7 @@ export async function GET(req: NextRequest) {
       'linkedin_id, linkedin_name, linkedin_headline, linkedin_avatar_url, linkedin_connected_at, linkedin_raw'
     )
     .eq('id', user.id)
-    .single();
+    .single<LinkedInProfile>();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

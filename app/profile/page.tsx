@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -10,6 +9,12 @@ import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overl
 import { Header } from "@/components/header";
 import { toast } from "@/components/toast";
 import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
+import { ProfileInfoCard } from "@/components/profile/ProfileInfoCard";
+import { DocumentsCard } from "@/components/profile/DocumentsCard";
+import { PreferencesCard } from "@/components/profile/PreferencesCard";
+import { IntegrationsCard } from "@/components/profile/IntegrationsCard";
+import { SecurityCard } from "@/components/profile/SecurityCard";
+import { DangerZoneCard } from "@/components/profile/DangerZoneCard";
 import {
   getOnboardingState,
   setOnboardingState,
@@ -59,8 +64,44 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
 
+  // Integrations state and loader
+  const [linkedinProfile, setLinkedinProfile] = useState<{
+    connected: boolean;
+    name?: string;
+    headline?: string;
+    picture?: string;
+    connectedAt?: string;
+  }>({ connected: false });
+  const [linkedinLoading, setLinkedinLoading] = useState(false);
+
+  // Placeholder for future integrations
+  const [placeholderIntegrations] = useState([
+    {
+      key: 'notion',
+      name: 'Notion',
+      description: 'Sync your notes and job search docs from Notion.',
+      connected: false,
+    },
+    {
+      key: 'google_drive',
+      name: 'Google Drive',
+      description: 'Import resumes, transcripts, and cover letters from Drive.',
+      connected: false,
+    },
+    {
+      key: 'github',
+      name: 'GitHub',
+      description: 'Showcase your open source work and link your profile.',
+      connected: false,
+    },
+  ]);
+
   useEffect(() => {
     loadProfile();
+  }, []);
+
+  useEffect(() => {
+    loadLinkedInProfile();
   }, []);
 
   async function loadProfile() {
@@ -119,6 +160,20 @@ export default function ProfilePage() {
     }
 
     setLoading(false);
+  }
+
+  async function loadLinkedInProfile() {
+    setLinkedinLoading(true);
+    try {
+      const res = await fetch('/api/profile/linkedin');
+      if (!res.ok) throw new Error('Failed to load LinkedIn integration');
+      const data = await res.json();
+      setLinkedinProfile(data);
+    } catch (e) {
+      setLinkedinProfile({ connected: false });
+    } finally {
+      setLinkedinLoading(false);
+    }
   }
 
   async function handleSaveProfile() {
@@ -479,6 +534,10 @@ export default function ProfilePage() {
     }
   }
 
+  function handleConnectLinkedIn() {
+    window.location.href = '/auth/linkedin';
+  }
+
   if (redirecting || deleting) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex items-center justify-center">
@@ -510,357 +569,235 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex flex-col">
       <Header showDashboard />
 
-      <div className="w-full max-w-4xl mx-auto px-8 py-12 flex-1">
-        <div className="mb-6">
+      <div className="w-full max-w-6xl mx-auto px-8 py-12 flex-1">
+        <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Profile Settings</h1>
           <p className="mt-1 text-sm text-gray-600">
-            Manage your account settings and preferences
+            Manage your account settings, documents, and security
           </p>
         </div>
 
-        <div className="space-y-6">
-          {/* Profile Information */}
-          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Profile Information</h2>
-                <p className="mt-1 text-sm text-gray-600">Update your personal details</p>
-              </div>
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-indigo-600 to-blue-600 text-white">
-                <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-              </div>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-6 items-start">
+          <div className="space-y-6">
+            <ProfileInfoCard
+              firstName={firstName}
+              lastName={lastName}
+              email={email}
+              bio={bio}
+              onFirstNameChange={setFirstName}
+              onLastNameChange={setLastName}
+              onBioChange={setBio}
+              onSave={handleSaveProfile}
+              onCancel={loadProfile}
+              saving={saving}
+            />
 
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">First name</label>
-                <input
-                  type="text"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  disabled={saving}
-                  className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="John"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Last name</label>
-                <input
-                  type="text"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  disabled={saving}
-                  className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="Doe"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">Email address</label>
-                <input
-                  type="email"
-                  value={email}
-                  disabled
-                  className="mt-1.5 w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-600 cursor-not-allowed"
-                  placeholder="john@example.com"
-                />
-                <p className="mt-1 text-xs text-gray-500">Email cannot be changed</p>
-              </div>
-              <div id="bio-section" className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">Bio</label>
-                <textarea
-                  rows={4}
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  disabled={saving}
-                  className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="Tell us about yourself..."
-                />
-              </div>
-            </div>
+            {/* Documents (restored original rich upload UI) */}
+            <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Documents</h2>
+              <p className="text-sm text-gray-600 mb-6">
+                Upload your resume and transcript for personalized coaching.
+              </p>
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => loadProfile()}
-                disabled={saving}
-                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Cancel
-              </button>
-              <button
-                id="save-profile-button"
-                onClick={handleSaveProfile}
-                disabled={saving}
-                className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white hover:from-indigo-700 hover:to-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? "Saving..." : "Save changes"}
-              </button>
-            </div>
-          </div>
-
-          {/* Documents */}
-          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Documents</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              Upload your resume and transcript for personalized coaching.
-            </p>
-
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              {/* Resume Upload */}
-              <div id="resume-upload-section">
-                <label className="block text-sm font-medium text-gray-700 mb-3">Resume</label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileSelect}
-                  disabled={uploading}
-                  className="hidden"
-                />
-                <div
-                  onClick={handleClick}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer"
-                >
-                  {uploading ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-                      <span className="text-sm font-medium text-indigo-600">Uploading...</span>
-                    </div>
-                  ) : uploadedFile || profile?.resume_url ? (
-                    <>
-                      <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <p className="mt-2 text-sm font-medium text-gray-900">
-                        {uploadedFile?.name || "Resume uploaded"}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                      </svg>
-                      <p className="mt-2 text-sm font-medium text-gray-900">
-                        Click to upload or drag and drop
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">PDF up to 10MB</p>
-                    </>
-                  )}
-                </div>
-                {profile?.resume_url && (
-                  <button
-                    onClick={handleViewResume}
-                    className="mt-2 inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                {/* Resume Upload */}
+                <div id="resume-upload-section">
+                  <label className="block text-sm font-medium text-gray-700 mb-3">Resume</label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileSelect}
+                    disabled={uploading}
+                    className="hidden"
+                  />
+                  <div
+                    onClick={handleClick}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer"
                   >
-                    View current resume
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {/* Transcript Upload */}
-              <div id="transcript-upload-section">
-                <label className="block text-sm font-medium text-gray-700 mb-3">Transcript</label>
-                <input
-                  ref={transcriptInputRef}
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleTranscriptSelect}
-                  disabled={uploadingTranscript}
-                  className="hidden"
-                />
-                <div
-                  onClick={handleTranscriptClick}
-                  className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer"
-                >
-                  {uploadingTranscript ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-                      <span className="text-sm font-medium text-indigo-600">Uploading...</span>
-                    </div>
-                  ) : uploadedTranscript || profile?.transcript_url ? (
-                    <>
-                      <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    {uploading ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                        <span className="text-sm font-medium text-indigo-600">Uploading...</span>
+                      </div>
+                    ) : uploadedFile || profile?.resume_url ? (
+                      <>
+                        <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="mt-2 text-sm font-medium text-gray-900">
+                          {uploadedFile?.name || "Resume uploaded"}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p className="mt-2 text-sm font-medium text-gray-900">
+                          Click to upload or drag and drop
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">PDF up to 10MB</p>
+                      </>
+                    )}
+                  </div>
+                  {profile?.resume_url && (
+                    <button
+                      onClick={handleViewResume}
+                      className="mt-2 inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
+                    >
+                      View current resume
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>
-                      <p className="mt-2 text-sm font-medium text-gray-900">
-                        {uploadedTranscript?.name || "Transcript uploaded"}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                      </svg>
-                      <p className="mt-2 text-sm font-medium text-gray-900">
-                        Click to upload or drag and drop
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">PDF up to 10MB</p>
-                    </>
+                    </button>
                   )}
                 </div>
-                {profile?.transcript_url && (
-                  <button
-                    onClick={handleViewTranscript}
-                    className="mt-2 inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
+
+                {/* Transcript Upload */}
+                <div id="transcript-upload-section">
+                  <label className="block text-sm font-medium text-gray-700 mb-3">Transcript</label>
+                  <input
+                    ref={transcriptInputRef}
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleTranscriptSelect}
+                    disabled={uploadingTranscript}
+                    className="hidden"
+                  />
+                  <div
+                    onClick={handleTranscriptClick}
+                    className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors cursor-pointer"
                   >
-                    View current transcript
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* AI Coaching Status */}
-            <div className="mt-8 pt-8 border-t border-gray-200">
-              <div className="mb-4">
-                <h3 className="text-base font-semibold text-gray-900">AI Coaching Status</h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  Text is automatically extracted from your uploaded PDFs to enable personalized AI coaching.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                  <div className="flex items-center gap-3">
-                    <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">Resume</p>
-                      {profile?.resume_url && <p className="text-xs text-gray-500">PDF uploaded</p>}
-                    </div>
+                    {uploadingTranscript ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                        <span className="text-sm font-medium text-indigo-600">Uploading...</span>
+                      </div>
+                    ) : uploadedTranscript || profile?.transcript_url ? (
+                      <>
+                        <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="mt-2 text-sm font-medium text-gray-900">
+                          {uploadedTranscript?.name || "Transcript uploaded"}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p className="mt-2 text-sm font-medium text-gray-900">
+                          Click to upload or drag and drop
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">PDF up to 10MB</p>
+                      </>
+                    )}
                   </div>
-                  {resumeText ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-green-600 font-medium">{resumeText.length.toLocaleString()} characters extracted</span>
-                      <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  {profile?.transcript_url && (
+                    <button
+                      onClick={handleViewTranscript}
+                      className="mt-2 inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
+                    >
+                      View current transcript
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-gray-400">No text extracted</span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                  <div className="flex items-center gap-3">
-                    <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">Transcript</p>
-                      {profile?.transcript_url && <p className="text-xs text-gray-500">PDF uploaded</p>}
-                    </div>
-                  </div>
-                  {transcriptText ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-green-600 font-medium">{transcriptText.length.toLocaleString()} characters extracted</span>
-                      <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-gray-400">No text extracted</span>
+                    </button>
                   )}
                 </div>
               </div>
-            </div>
-          </div>
 
-          {/* Preferences */}
-          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Preferences</h2>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">Email notifications</p>
-                  <p className="text-xs text-gray-500">Receive updates about your applications</p>
+              {/* AI Coaching Status */}
+              <div className="mt-8 pt-8 border-t border-gray-200">
+                <div className="mb-4">
+                  <h3 className="text-base font-semibold text-gray-900">AI Coaching Status</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Text is automatically extracted from your uploaded PDFs to enable personalized AI coaching.
+                  </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEmailNotifications(!emailNotifications);
-                    handlePreferencesUpdate();
-                  }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${emailNotifications ? "bg-indigo-600" : "bg-gray-200"
-                    }`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${emailNotifications ? "translate-x-6" : "translate-x-1"
-                    }`} />
-                </button>
-              </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">Marketing emails</p>
-                  <p className="text-xs text-gray-500">Receive tips and updates from AppliHero</p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                    <div className="flex items-center gap-3">
+                      <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Resume</p>
+                        {profile?.resume_url && <p className="text-xs text-gray-500">PDF uploaded</p>}
+                      </div>
+                    </div>
+                    {resumeText ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-green-600 font-medium">{resumeText.length.toLocaleString()} characters extracted</span>
+                        <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">No text extracted</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                    <div className="flex items-center gap-3">
+                      <svg className="h-5 w-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Transcript</p>
+                        {profile?.transcript_url && <p className="text-xs text-gray-500">PDF uploaded</p>}
+                      </div>
+                    </div>
+                    {transcriptText ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-green-600 font-medium">{transcriptText.length.toLocaleString()} characters extracted</span>
+                        <svg className="h-5 w-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">No text extracted</span>
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setMarketingEmails(!marketingEmails);
-                    handlePreferencesUpdate();
-                  }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${marketingEmails ? "bg-indigo-600" : "bg-gray-200"
-                    }`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${marketingEmails ? "translate-x-6" : "translate-x-1"
-                    }`} />
-                </button>
               </div>
             </div>
           </div>
 
-          {/* Password & Security */}
-          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Password & Security</h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Email (cannot be changed)
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  disabled
-                  className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-600 cursor-not-allowed"
-                />
-              </div>
+          <div className="flex flex-col gap-6 h-full">
+            <PreferencesCard
+              emailNotifications={emailNotifications}
+              marketingEmails={marketingEmails}
+              onToggleEmailNotifications={() => {
+                setEmailNotifications(!emailNotifications);
+                handlePreferencesUpdate();
+              }}
+              onToggleMarketingEmails={() => {
+                setMarketingEmails(!marketingEmails);
+                handlePreferencesUpdate();
+              }}
+            />
 
-              <div className="pt-2">
-                <button
-                  onClick={() => setShowPasswordModal(true)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                  </svg>
-                  Change Password
-                </button>
-              </div>
-            </div>
-          </div>
+            {/* Integrations List */}
+            <IntegrationsCard
+              linkedinProfile={linkedinProfile}
+              linkedinLoading={linkedinLoading}
+              onConnectLinkedIn={handleConnectLinkedIn}
+              placeholderIntegrations={placeholderIntegrations}
+            />
 
-          {/* Danger Zone */}
-          <div className="rounded-xl border border-red-200 bg-red-50 p-6">
-            <h2 className="text-lg font-semibold text-red-900 mb-2">Danger Zone</h2>
-            <p className="text-sm text-red-700 mb-4">
-              Permanently delete your account and all your data. This action cannot be undone.
-            </p>
-            <button
-              onClick={handleDeleteAccount}
-              className="rounded-lg border border-red-600 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-600 hover:text-white transition-colors"
-            >
-              Delete account
-            </button>
+            <SecurityCard
+              email={email}
+              onChangePassword={() => setShowPasswordModal(true)}
+            />
+
+            <div className="flex-1" />
+            <DangerZoneCard onDeleteAccount={handleDeleteAccount} />
           </div>
         </div>
       </div>

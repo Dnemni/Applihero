@@ -1,20 +1,27 @@
+import { getLinkedInRedirectUri } from "@/lib/oauth/redirect";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  storeLinkedInCodeVerifier,
+} from "@/lib/linkedin-pkce";
+
 // LinkedIn OAuth configuration and utilities
 export const linkedinOAuthConfig = {
   clientId: process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID || '',
-  clientSecret: process.env.LINKEDIN_CLIENT_SECRET || '',
-  redirectUri: typeof window !== 'undefined' 
-    ? `${window.location.origin}/auth/linkedin-callback`
-    : process.env.NEXT_PUBLIC_APP_URL ? `${process.env.NEXT_PUBLIC_APP_URL}/auth/linkedin-callback` : '',
+  clientSecret: process.env.LINKEDIN_SECRET || '',
 };
 
-// Generate LinkedIn OAuth URL for sign-in
-export function getLinkedInOAuthURL(state: string) {
+// Build the LinkedIn OAuth 2.0 authorization URL (3-legged OAuth with PKCE)
+export async function getLinkedInOAuthURL(state: string) {
+  const redirectUri = getLinkedInRedirectUri();
+
+  // LinkedIn verification product does NOT require PKCE
   const params = new URLSearchParams({
-    response_type: 'code',
+    response_type: "code",
     client_id: linkedinOAuthConfig.clientId,
-    redirect_uri: linkedinOAuthConfig.redirectUri,
+    redirect_uri: redirectUri,
     state,
-    scope: 'openid profile email',
+    scope: "r_verify r_profile_basicinfo",
   });
 
   return `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}`;

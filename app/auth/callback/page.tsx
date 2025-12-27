@@ -18,7 +18,7 @@ export default function AuthCallbackPage() {
                         if (event === 'SIGNED_IN' && session?.user) {
                             try {
                                 // Wait a moment for the profile trigger to complete
-                                await new Promise(resolve => setTimeout(resolve, 500));
+                                await new Promise(resolve => setTimeout(resolve, 100));
                                 
                                 // Check if user signed up with OAuth and doesn't have a password yet
                                 const { data: identities, error: identitiesError } = await supabase
@@ -86,7 +86,7 @@ export default function AuthCallbackPage() {
                     // Check profile and redirect appropriately
                     try {
                         // Wait a moment for profile trigger
-                        await new Promise(resolve => setTimeout(resolve, 500));
+                        await new Promise(resolve => setTimeout(resolve, 100));
                         
                         // Check if OAuth-only user
                         const { data: identities } = await supabase
@@ -142,7 +142,7 @@ export default function AuthCallbackPage() {
                                 router.push("/login");
                             }
                         });
-                    }, 1000);
+                    }, 100);
                 }
 
                 // Cleanup subscription on unmount
@@ -158,12 +158,8 @@ export default function AuthCallbackPage() {
     }, [router]);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex items-center justify-center">
-            <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                <p className="text-lg font-medium text-gray-900 mb-2">Completing sign in...</p>
-                <p className="text-sm text-gray-600">Please wait</p>
-            </div>
+        <div className="min-h-screen flex items-center justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
         </div>
     );
 }

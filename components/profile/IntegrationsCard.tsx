@@ -11,7 +11,32 @@ interface IntegrationsCardProps {
   onConnectLinkedIn: () => void;
 }
 
-export function IntegrationsCard({ linkedinProfile, linkedinLoading, onConnectLinkedIn }: IntegrationsCardProps) {
+interface PlaceholderIntegration {
+  key: string;
+  name: string;
+  description: string;
+  connected: boolean;
+}
+
+export function IntegrationsCard({
+  linkedinProfile,
+  linkedinLoading,
+  onConnectLinkedIn,
+  placeholderIntegrations = [],
+}: IntegrationsCardProps & { placeholderIntegrations?: PlaceholderIntegration[] }) {
+  // LinkedIn OAuth integration logic
+  const handleConnectLinkedIn = async () => {
+    // Generate state for CSRF protection
+    const state = Math.random().toString(36).substring(2, 15);
+    sessionStorage.setItem('linkedin_oauth_state', state);
+    // Build LinkedIn OAuth URL
+    const clientId = process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID;
+    const redirectUri = `${window.location.origin}/api/profile/linkedin-callback`;
+    const scope = 'openid profile email';
+    const linkedinOAuthURL = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${encodeURIComponent(scope)}`;
+    window.location.href = linkedinOAuthURL;
+  };
+
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col h-full">
       <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -31,11 +56,31 @@ export function IntegrationsCard({ linkedinProfile, linkedinLoading, onConnectLi
         </div>
       ) : (
         <button
-          onClick={onConnectLinkedIn}
+          onClick={handleConnectLinkedIn}
           className="mt-3 px-4 py-2 rounded-lg bg-[#0077B5] text-white font-semibold hover:bg-[#005983] transition"
         >
           Connect LinkedIn
         </button>
+      )}
+
+      {/* Placeholder integrations */}
+      {placeholderIntegrations.length > 0 && (
+        <div className="mt-8 space-y-4">
+          {placeholderIntegrations.map((integration) => (
+            <div key={integration.key} className="rounded-lg border border-gray-100 bg-gray-50 p-4 flex items-center justify-between">
+              <div>
+                <div className="font-semibold text-gray-900">{integration.name}</div>
+                <div className="text-xs text-gray-600 mt-1">{integration.description}</div>
+              </div>
+              <button
+                className="px-3 py-1.5 rounded bg-gray-200 text-gray-700 text-xs font-medium cursor-not-allowed opacity-60"
+                disabled
+              >
+                Coming soon
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </section>
   );

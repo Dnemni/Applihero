@@ -124,8 +124,8 @@ export default function SignupPage() {
       // Store state in sessionStorage
       storeLinkedInOAuthState(state);
       
-      // Get LinkedIn OAuth URL
-      const linkedinOAuthURL = getLinkedInOAuthURL(state);
+      // Get LinkedIn OAuth URL (now async with PKCE)
+      const linkedinOAuthURL = await getLinkedInOAuthURL(state);
       
       // Redirect to LinkedIn OAuth
       window.location.href = linkedinOAuthURL;

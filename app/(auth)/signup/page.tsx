@@ -351,6 +351,7 @@ export default function SignupPage() {
                     )}
                   </button>
 
+                  {/*
                   <button
                     type="button"
                     onClick={handleLinkedInSignIn}
@@ -371,6 +372,7 @@ export default function SignupPage() {
                       </>
                     )}
                   </button>
+                  */}
                 </div>
               </div>
 

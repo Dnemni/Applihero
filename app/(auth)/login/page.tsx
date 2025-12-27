@@ -250,6 +250,7 @@ export default function LoginPage() {
                   )}
                 </button>
 
+                {/*
                 <button
                   type="button"
                   onClick={handleLinkedInSignIn}
@@ -273,6 +274,7 @@ export default function LoginPage() {
                     </>
                   )}
                 </button>
+                */}
               </div>
             </div>
 

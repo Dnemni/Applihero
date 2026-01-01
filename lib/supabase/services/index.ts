@@ -3,3 +3,4 @@ export { ProfileService } from './profile.service';
 export { JobService } from './job.service';
 export { QuestionService } from './question.service';
 export { ChatService } from './chat.service';
+export { AnalyticsService } from './analytics.service';

@@ -115,9 +115,28 @@ export class JobService {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
 
+    // Prepare update object
+    const updateData: any = { status };
+    
+    // If status is being changed to 'Submitted', set submitted_at
+    if (status === 'Submitted') {
+      // Check if submitted_at is already set (don't overwrite if it exists)
+      const { data: existingJob } = await supabase
+        .from('jobs')
+        .select('submitted_at')
+        .eq('id', jobId)
+        .eq('user_id', user.id)
+        .single();
+      
+      // Only set submitted_at if it's not already set
+      if (!existingJob?.submitted_at) {
+        updateData.submitted_at = new Date().toISOString();
+      }
+    }
+
     const { data, error } = await supabase
       .from('jobs')
-      .update({ status })
+      .update(updateData)
       .eq('id', jobId)
       .eq('user_id', user.id);
 

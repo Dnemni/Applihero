@@ -83,6 +83,9 @@ export interface Database {
           created_at: string;
           updated_at: string;
           last_touched_at: string;
+          submitted_at: string | null;
+          outcome: string | null;
+          interview_stage: string | null;
         };
         Insert: {
           id?: string;
@@ -94,6 +97,9 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           last_touched_at?: string;
+          submitted_at?: string | null;
+          outcome?: string | null;
+          interview_stage?: string | null;
         };
         Update: {
           id?: string;
@@ -105,6 +111,9 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           last_touched_at?: string;
+          submitted_at?: string | null;
+          outcome?: string | null;
+          interview_stage?: string | null;
         };
       };
       questions: {

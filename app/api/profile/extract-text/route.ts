@@ -83,6 +83,27 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`Extracted ${extractedText.length} characters from ${fileType} for user ${userId}`);
+    
+    // Trigger structured data parsing asynchronously (don't await to avoid blocking the response)
+    // This will parse the extracted text and populate skills, experience, education, and projects tables
+    const parseUrl = `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/profile/parse-structured-data`;
+    const parseBody = {
+      userId,
+      source: fileType,
+      forceReparse: false,
+    };
+    console.log('[extract-text] Triggering parse-structured-data:', parseUrl, parseBody);
+    fetch(parseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(parseBody),
+    }).catch((error) => {
+      console.error('Error triggering structured data parsing:', error);
+      // Don't fail the upload - parsing can be retried later
+    });
+
     return NextResponse.json({ success: true, textLength: extractedText.length });
   } catch (err: any) {
     console.error('Extract text error:', err);

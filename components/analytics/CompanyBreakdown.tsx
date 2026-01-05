@@ -33,7 +33,10 @@ export function CompanyBreakdown({ data }: CompanyBreakdownProps) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Company Breakdown</h3>
-      <div className="space-y-3">
+      <div
+        className="space-y-3"
+        style={{ maxHeight: '702px', overflowY: 'auto' }}
+      >
         {data.slice(0, 10).map((item, index) => (
           <div
             key={index}

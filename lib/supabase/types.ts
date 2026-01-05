@@ -12,6 +12,9 @@ export type JobStatus = 'Draft' | 'In Progress' | 'Submitted' | 'Archived';
 export type QuestionStatus = 'Not started' | 'Draft' | 'Final';
 export type ChatRole = 'user' | 'assistant' | 'system';
 export type DocumentType = 'cover_letter' | 'additional_essay' | 'other';
+export type DataSource = 'resume' | 'transcript' | 'linkedin' | 'manual';
+export type SkillCategory = 'technical' | 'soft' | 'language' | 'tool' | 'framework' | 'domain_knowledge' | 'other';
+export type ProficiencyLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
 
 export interface Database {
   public: {
@@ -34,6 +37,15 @@ export interface Database {
           created_at: string;
           updated_at: string;
           onboarding_phase: string | null;
+          profile_data_parsed_at: string | null;
+          profile_data_sources: string[];
+          profile_completeness_score: number;
+          linkedin_id: string | null;
+          linkedin_name: string | null;
+          linkedin_headline: string | null;
+          linkedin_avatar_url: string | null;
+          linkedin_raw: any | null;
+          linkedin_connected_at: string | null;
         };
         Insert: {
           id: string;
@@ -41,10 +53,10 @@ export interface Database {
           last_name?: string | null;
           email: string;
           bio?: string | null;
-          resume_url: string | null;
-          transcript_url: string | null;
-          resume_text: string | null;
-          transcript_text: string | null;
+          resume_url?: string | null;
+          transcript_url?: string | null;
+          resume_text?: string | null;
+          transcript_text?: string | null;
           email_notifications?: boolean;
           onboarding_completed?: boolean;
           marketing_emails?: boolean;
@@ -52,6 +64,15 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           onboarding_phase?: string | null;
+          profile_data_parsed_at?: string | null;
+          profile_data_sources?: string[];
+          profile_completeness_score?: number;
+          linkedin_id?: string | null;
+          linkedin_name?: string | null;
+          linkedin_headline?: string | null;
+          linkedin_avatar_url?: string | null;
+          linkedin_raw?: any | null;
+          linkedin_connected_at?: string | null;
         };
         Update: {
           id?: string;
@@ -70,6 +91,15 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           onboarding_phase?: string | null;
+          profile_data_parsed_at?: string | null;
+          profile_data_sources?: string[];
+          profile_completeness_score?: number;
+          linkedin_id?: string | null;
+          linkedin_name?: string | null;
+          linkedin_headline?: string | null;
+          linkedin_avatar_url?: string | null;
+          linkedin_raw?: any | null;
+          linkedin_connected_at?: string | null;
         };
       };
       jobs: {
@@ -253,6 +283,215 @@ export interface Database {
           updated_at?: string;
         };
       };
+      profile_skills: {
+        Row: {
+          id: string;
+          user_id: string;
+          skill_name: string;
+          category: SkillCategory | null;
+          proficiency_level: ProficiencyLevel | null;
+          years_of_experience: number | null;
+          source: DataSource;
+          source_confidence: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          skill_name: string;
+          category?: SkillCategory | null;
+          proficiency_level?: ProficiencyLevel | null;
+          years_of_experience?: number | null;
+          source: DataSource;
+          source_confidence?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          skill_name?: string;
+          category?: SkillCategory | null;
+          proficiency_level?: ProficiencyLevel | null;
+          years_of_experience?: number | null;
+          source?: DataSource;
+          source_confidence?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      profile_experience: {
+        Row: {
+          id: string;
+          user_id: string;
+          company_name: string;
+          job_title: string;
+          start_date: string | null;
+          end_date: string | null;
+          is_current: boolean;
+          location: string | null;
+          description: string | null;
+          achievements: string[];
+          technologies_used: string[];
+          source: DataSource;
+          source_confidence: number | null;
+          linkedin_company_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          company_name: string;
+          job_title: string;
+          start_date?: string | null;
+          end_date?: string | null;
+          is_current?: boolean;
+          location?: string | null;
+          description?: string | null;
+          achievements?: string[];
+          technologies_used?: string[];
+          source: DataSource;
+          source_confidence?: number | null;
+          linkedin_company_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          company_name?: string;
+          job_title?: string;
+          start_date?: string | null;
+          end_date?: string | null;
+          is_current?: boolean;
+          location?: string | null;
+          description?: string | null;
+          achievements?: string[];
+          technologies_used?: string[];
+          source?: DataSource;
+          source_confidence?: number | null;
+          linkedin_company_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      profile_education: {
+        Row: {
+          id: string;
+          user_id: string;
+          institution_name: string;
+          degree: string | null;
+          field_of_study: string | null;
+          start_date: string | null;
+          end_date: string | null;
+          is_current: boolean;
+          gpa: number | null;
+          gpa_scale: number;
+          honors: string[];
+          relevant_coursework: string[];
+          description: string | null;
+          source: DataSource;
+          source_confidence: number | null;
+          linkedin_school_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          institution_name: string;
+          degree?: string | null;
+          field_of_study?: string | null;
+          start_date?: string | null;
+          end_date?: string | null;
+          is_current?: boolean;
+          gpa?: number | null;
+          gpa_scale?: number;
+          honors?: string[];
+          relevant_coursework?: string[];
+          description?: string | null;
+          source: DataSource;
+          source_confidence?: number | null;
+          linkedin_school_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          institution_name?: string;
+          degree?: string | null;
+          field_of_study?: string | null;
+          start_date?: string | null;
+          end_date?: string | null;
+          is_current?: boolean;
+          gpa?: number | null;
+          gpa_scale?: number;
+          honors?: string[];
+          relevant_coursework?: string[];
+          description?: string | null;
+          source?: DataSource;
+          source_confidence?: number | null;
+          linkedin_school_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      profile_projects: {
+        Row: {
+          id: string;
+          user_id: string;
+          project_name: string;
+          description: string | null;
+          role: string | null;
+          start_date: string | null;
+          end_date: string | null;
+          is_ongoing: boolean;
+          technologies_used: string[];
+          achievements: string[];
+          project_url: string | null;
+          source: DataSource;
+          source_confidence: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          project_name: string;
+          description?: string | null;
+          role?: string | null;
+          start_date?: string | null;
+          end_date?: string | null;
+          is_ongoing?: boolean;
+          technologies_used?: string[];
+          achievements?: string[];
+          project_url?: string | null;
+          source: DataSource;
+          source_confidence?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          project_name?: string;
+          description?: string | null;
+          role?: string | null;
+          start_date?: string | null;
+          end_date?: string | null;
+          is_ongoing?: boolean;
+          technologies_used?: string[];
+          achievements?: string[];
+          project_url?: string | null;
+          source?: DataSource;
+          source_confidence?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
   };
 }
@@ -264,6 +503,22 @@ export type Question = Database['public']['Tables']['questions']['Row'];
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row'];
 export type JobDocument = Database['public']['Tables']['job_documents']['Row'];
 export type ResumeVersion = Database['public']['Tables']['resume_versions']['Row'];
+export type ProfileSkill = Database['public']['Tables']['profile_skills']['Row'];
+export type ProfileExperience = Database['public']['Tables']['profile_experience']['Row'];
+export type ProfileEducation = Database['public']['Tables']['profile_education']['Row'];
+export type ProfileProject = Database['public']['Tables']['profile_projects']['Row'];
+
+// Insert types
+export type ProfileSkillInsert = Database['public']['Tables']['profile_skills']['Insert'];
+export type ProfileExperienceInsert = Database['public']['Tables']['profile_experience']['Insert'];
+export type ProfileEducationInsert = Database['public']['Tables']['profile_education']['Insert'];
+export type ProfileProjectInsert = Database['public']['Tables']['profile_projects']['Insert'];
+
+// Update types
+export type ProfileSkillUpdate = Database['public']['Tables']['profile_skills']['Update'];
+export type ProfileExperienceUpdate = Database['public']['Tables']['profile_experience']['Update'];
+export type ProfileEducationUpdate = Database['public']['Tables']['profile_education']['Update'];
+export type ProfileProjectUpdate = Database['public']['Tables']['profile_projects']['Update'];
 
 // Types with relations
 export type JobWithQuestions = Job & {
@@ -275,3 +530,58 @@ export type JobWithDetails = Job & {
   chat_messages: ChatMessage[];
   documents: JobDocument[];
 };
+
+export type ProfileWithData = Profile & {
+  skills: ProfileSkill[];
+  experience: ProfileExperience[];
+  education: ProfileEducation[];
+  projects: ProfileProject[];
+};
+
+// Parsed data structure from LLM
+export interface ParsedProfileData {
+  skills: Array<{
+    skill_name: string;
+    category?: SkillCategory;
+    proficiency_level?: ProficiencyLevel;
+    years_of_experience?: number;
+    confidence: number;
+  }>;
+  experience: Array<{
+    company_name: string;
+    job_title: string;
+    start_date?: string;
+    end_date?: string;
+    is_current: boolean;
+    location?: string;
+    description?: string;
+    achievements: string[];
+    technologies_used: string[];
+    confidence: number;
+  }>;
+  education: Array<{
+    institution_name: string;
+    degree?: string;
+    field_of_study?: string;
+    start_date?: string;
+    end_date?: string;
+    is_current: boolean;
+    gpa?: number;
+    gpa_scale?: number;
+    honors: string[];
+    relevant_coursework: string[];
+    confidence: number;
+  }>;
+  projects: Array<{
+    project_name: string;
+    description?: string;
+    role?: string;
+    start_date?: string;
+    end_date?: string;
+    is_ongoing: boolean;
+    technologies_used: string[];
+    achievements: string[];
+    project_url?: string;
+    confidence: number;
+  }>;
+}

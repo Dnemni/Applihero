@@ -15,6 +15,10 @@ import { PreferencesCard } from "@/components/profile/PreferencesCard";
 import { IntegrationsCard } from "@/components/profile/IntegrationsCard";
 import { SecurityCard } from "@/components/profile/SecurityCard";
 import { DangerZoneCard } from "@/components/profile/DangerZoneCard";
+import { SkillsSection } from "@/components/profile/SkillsSection";
+import { ExperienceSection } from "@/components/profile/ExperienceSection";
+import { EducationSection } from "@/components/profile/EducationSection";
+import { ProjectsSection } from "@/components/profile/ProjectsSection";
 import {
   getOnboardingState,
   setOnboardingState,
@@ -30,6 +34,12 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadingTranscript, setUploadingTranscript] = useState(false);
+  
+  // Refs for profile data sections
+  const skillsRef = useRef<{ refresh: () => Promise<void> }>(null);
+  const experienceRef = useRef<{ refresh: () => Promise<void> }>(null);
+  const educationRef = useRef<{ refresh: () => Promise<void> }>(null);
+  const projectsRef = useRef<{ refresh: () => Promise<void> }>(null);
 
   // Form fields
   const [firstName, setFirstName] = useState("");
@@ -337,6 +347,42 @@ export default function ProfilePage() {
   }
 
 
+
+  // Poll for profile parsing completion
+  async function pollForParsedProfile(maxAttempts = 10, interval = 2000) {
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      const updatedProfile = await ProfileService.getCurrentProfile();
+      if (updatedProfile && updatedProfile.resume_text && updatedProfile.profile_data_sources?.includes('resume')) {
+        setProfile(updatedProfile);
+        setResumeText(updatedProfile.resume_text || "");
+        toast.success("Resume parsed!", `Structured data extracted for AI coaching.`);
+        // Automatically trigger profile parsing after resume text extraction
+        await fetch('/api/profile/parse-structured-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: updatedProfile.id,
+            source: 'resume',
+            forceReparse: true,
+          }),
+        });
+        // Reload profile data after parsing
+        const parsedProfile = await ProfileService.getCurrentProfile();
+        if (parsedProfile) {
+          setProfile(parsedProfile);
+          setResumeText(parsedProfile.resume_text || "");
+        }
+        toast.success("Resume parsed and profile updated!", `Structured data extracted for AI coaching.`);
+        return true;
+      }
+      await new Promise(res => setTimeout(res, interval));
+      attempts++;
+    }
+    toast.info("Resume uploaded!", "Text extraction is processing, but parsing may take longer.");
+    return false;
+  }
+
   async function handleResumeUpload(file: File) {
     if (file.type !== "application/pdf") {
       toast.error("Please upload a PDF file");
@@ -348,31 +394,31 @@ export default function ProfilePage() {
 
     if (url) {
       setUploadedFile(file);
-
-      // Wait a moment for text extraction to complete
-      setTimeout(async () => {
-        const updatedProfile = await ProfileService.getCurrentProfile();
-        if (updatedProfile) {
-          setProfile(updatedProfile);
-          setResumeText(updatedProfile.resume_text || "");
-
-          if (updatedProfile.resume_text) {
-            toast.success("Resume uploaded!", `Extracted ${updatedProfile.resume_text.length.toLocaleString()} characters for AI coaching.`);
-          } else {
-            toast.info("Resume uploaded!", "Text extraction is processing...");
-          }
-
-          // Auto-advance onboarding if on resume step
-          if (showOnboarding && onboardingStep === 1) {
-            setTimeout(() => handleOnboardingNext(), 500);
-          }
-        }
-        setUploading(false);
-      }, 2000);
+      // Wait for parsing to complete (poll for up to ~20s)
+      await pollForParsedProfile();
+      setUploading(false);
     } else {
       toast.error("Failed to upload resume");
       setUploading(false);
     }
+  }
+
+
+  async function pollForParsedTranscript(maxAttempts = 10, interval = 2000) {
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      const updatedProfile = await ProfileService.getCurrentProfile();
+      if (updatedProfile && updatedProfile.transcript_text && updatedProfile.profile_data_sources?.includes('transcript')) {
+        setProfile(updatedProfile);
+        setTranscriptText(updatedProfile.transcript_text || "");
+        toast.success("Transcript parsed!", `Structured data extracted for AI coaching.`);
+        return true;
+      }
+      await new Promise(res => setTimeout(res, interval));
+      attempts++;
+    }
+    toast.info("Transcript uploaded!", "Text extraction is processing, but parsing may take longer.");
+    return false;
   }
 
   async function handleTranscriptUpload(file: File) {
@@ -386,27 +432,8 @@ export default function ProfilePage() {
 
     if (url) {
       setUploadedTranscript(file);
-
-      // Wait a moment for text extraction to complete
-      setTimeout(async () => {
-        const updatedProfile = await ProfileService.getCurrentProfile();
-        if (updatedProfile) {
-          setProfile(updatedProfile);
-          setTranscriptText(updatedProfile.transcript_text || "");
-
-          if (updatedProfile.transcript_text) {
-            toast.success("Transcript uploaded!", `Extracted ${updatedProfile.transcript_text.length.toLocaleString()} characters for AI coaching.`);
-          } else {
-            toast.info("Transcript uploaded!", "Text extraction is processing...");
-          }
-
-          // Auto-advance onboarding if on transcript step
-          if (showOnboarding && onboardingStep === 2) {
-            setTimeout(() => handleOnboardingNext(), 500);
-          }
-        }
-        setUploadingTranscript(false);
-      }, 2000);
+      await pollForParsedTranscript();
+      setUploadingTranscript(false);
     } else {
       toast.error("Failed to upload transcript");
       setUploadingTranscript(false);
@@ -538,6 +565,42 @@ export default function ProfilePage() {
     window.location.href = '/auth/linkedin';
   }
 
+  // Debug: Trigger profile parsing from client
+  async function handleDebugParseProfile() {
+    if (!profile) {
+      toast.error('No profile loaded');
+      return;
+    }
+    try {
+      toast.info('Triggering profile parsing...');
+      const res = await fetch('/api/profile/parse-structured-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: profile.id,
+          source: 'resume',
+          forceReparse: true,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success('Profile parsed and synced!', 'Reloading profile data...');
+        // Hot reload all profile sections
+        await Promise.all([
+          skillsRef.current?.refresh(),
+          experienceRef.current?.refresh(),
+          educationRef.current?.refresh(),
+          projectsRef.current?.refresh(),
+        ]);
+      } else {
+        toast.error('Parse failed', data.error || 'Unknown error');
+      }
+      console.log('[DebugParse] Response:', data);
+    } catch (err) {
+      toast.error('Parse failed', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (redirecting || deleting) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50 flex items-center justify-center">
@@ -594,7 +657,20 @@ export default function ProfilePage() {
 
             {/* Documents (restored original rich upload UI) */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Documents</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">Documents</h2>
+                <button
+                  onClick={handleDebugParseProfile}
+                  disabled={!profile}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  type="button"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Sync Profile Data
+                </button>
+              </div>
               <p className="text-sm text-gray-600 mb-6">
                 Upload your resume and transcript for personalized coaching.
               </p>
@@ -712,12 +788,14 @@ export default function ProfilePage() {
               </div>
 
               {/* AI Coaching Status */}
-              <div className="mt-8 pt-8 border-t border-gray-200">
-                <div className="mb-4">
-                  <h3 className="text-base font-semibold text-gray-900">AI Coaching Status</h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Text is automatically extracted from your uploaded PDFs to enable personalized AI coaching.
-                  </p>
+              <div className="mt-8 pt-8 border-t border-gray-200 relative">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">AI Coaching Status</h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Text is automatically extracted from your uploaded PDFs to enable personalized AI coaching.
+                    </p>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -767,6 +845,15 @@ export default function ProfilePage() {
                 </div>
               </div>
             </div>
+
+            {/* Enhanced Profile Data Sections */}
+            {profile && (
+              <>
+                <SkillsSection ref={skillsRef} userId={profile.id} editable={true} />
+                <ExperienceSection ref={experienceRef} userId={profile.id} editable={true} />
+                <EducationSection ref={educationRef} userId={profile.id} editable={true} />
+              </>
+            )}
           </div>
 
           <div className="flex flex-col gap-6 h-full">
@@ -795,6 +882,11 @@ export default function ProfilePage() {
               email={email}
               onChangePassword={() => setShowPasswordModal(true)}
             />
+
+            {/* Projects Section */}
+            {profile && (
+              <ProjectsSection ref={projectsRef} userId={profile.id} editable={true} />
+            )}
 
             <div className="flex-1" />
             <DangerZoneCard onDeleteAccount={handleDeleteAccount} />

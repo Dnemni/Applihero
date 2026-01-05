@@ -21,15 +21,64 @@
 │  - bio                              │
 │  - resume_url                       │  → Storage: resumes bucket
 │  - transcript_url                   │  → Storage: transcripts bucket
+│  - resume_text                      │
+│  - transcript_text                  │
 │  - email_notifications (bool)      │
 │  - marketing_emails (bool)          │
 │  - active (bool)                    │
+│  - profile_data_parsed_at           │
+│  - profile_data_sources (array)    │
+│  - profile_completeness_score (int)│
+│  - linkedin_id, linkedin_name, etc. │
 │  - created_at                       │
 │  - updated_at                       │
-└─────────────────┬───────────────────┘
-                  │ 1:N
-                  │
-                  ▼
+└──────┬──────────┬──────────┬────────┘
+       │ 1:N      │ 1:N      │ 1:N
+       │          │          │
+       │          │          └──────────────────────┐
+       │          │                                 │
+       │          └─────────────┐                   │
+       │                        │                   │
+       ▼                        ▼                   ▼
+┌──────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│profile_skills│  │profile_experience│  │profile_education │
+├──────────────┤  ├──────────────────┤  ├──────────────────┤
+│id (PK)       │  │id (PK)           │  │id (PK)           │
+│user_id FK    │  │user_id FK        │  │user_id FK        │
+│skill_name    │  │company_name      │  │institution_name  │
+│category      │  │job_title         │  │degree            │
+│proficiency   │  │start_date        │  │field_of_study    │
+│years_exp     │  │end_date          │  │start_date        │
+│source        │  │is_current        │  │end_date          │
+│confidence    │  │location          │  │is_current        │
+│created_at    │  │description       │  │gpa               │
+│updated_at    │  │achievements[]    │  │honors[]          │
+└──────────────┘  │technologies[]    │  │coursework[]      │
+                  │source            │  │source            │
+┌──────────────┐  │confidence        │  │confidence        │
+│profile_      │  │created_at        │  │created_at        │
+│ projects     │  │updated_at        │  │updated_at        │
+├──────────────┤  └──────────────────┘  └──────────────────┘
+│id (PK)       │
+│user_id FK    │
+│project_name  │
+│description   │
+│role          │
+│start_date    │
+│end_date      │
+│is_ongoing    │
+│technologies[]│
+│achievements[]│
+│project_url   │
+│source        │
+│confidence    │
+│created_at    │
+│updated_at    │
+└──────────────┘
+       │ (from profiles)
+       │ 1:N
+       │
+       ▼
 ┌─────────────────────────────────────┐
 │              jobs                   │
 │  - id (UUID) PK                     │
@@ -75,8 +124,49 @@
 ### profiles
 **Purpose:** Store user profile information extending Supabase auth
 - Links 1:1 with auth.users
-- Contains personal info, resume/transcript links, preferences
+- Contains personal info, resume/transcript links and extracted text, preferences
+- Stores LinkedIn integration data (linkedin_id, linkedin_name, linkedin_raw, etc.)
+- Tracks profile data parsing status (profile_data_parsed_at, profile_data_sources)
+- Profile completeness score (0-100) for gamification
 - Soft delete with `active` flag
+
+### Enhanced Profile Data Tables
+
+#### profile_skills
+**Purpose:** Store user's skills extracted from resume/transcript/LinkedIn or manually added
+- Links to profiles (user_id)
+- Categorized skills (technical, soft, language, tool, framework, domain_knowledge)
+- Proficiency levels (beginner, intermediate, advanced, expert)
+- Source tracking (resume, transcript, linkedin, manual)
+- Confidence scores for AI-parsed data (0.00-1.00)
+
+#### profile_experience
+**Purpose:** Store work experience history
+- Links to profiles (user_id)
+- Company, job title, dates (start_date, end_date)
+- Location and description
+- Achievements stored as array for bullet points
+- Technologies used in each role
+- Source tracking and confidence scores
+- LinkedIn company ID for integration
+
+#### profile_education
+**Purpose:** Store educational background
+- Links to profiles (user_id)
+- Institution, degree, field of study
+- Dates, GPA, and honors
+- Relevant coursework as array
+- Source tracking and confidence scores
+- LinkedIn school ID for integration
+
+#### profile_projects
+**Purpose:** Store personal, academic, or professional projects
+- Links to profiles (user_id)
+- Project name, description, role
+- Dates and ongoing status
+- Technologies used and achievements
+- Project URL (GitHub, portfolio, etc.)
+- Source tracking and confidence scores
 
 ### jobs
 **Purpose:** Track job applications user is working on
@@ -196,6 +286,17 @@ CREATE INDEX idx_questions_order ON questions(job_id, order_index);
 -- Chat message lookups
 CREATE INDEX idx_chat_messages_job_id ON chat_messages(job_id);
 CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at);
+
+-- Profile data lookups
+CREATE INDEX idx_profile_skills_user_id ON profile_skills(user_id);
+CREATE INDEX idx_profile_skills_category ON profile_skills(category);
+CREATE INDEX idx_profile_experience_user_id ON profile_experience(user_id);
+CREATE INDEX idx_profile_experience_dates ON profile_experience(start_date DESC, end_date DESC);
+CREATE INDEX idx_profile_experience_current ON profile_experience(user_id, is_current) WHERE is_current = true;
+CREATE INDEX idx_profile_education_user_id ON profile_education(user_id);
+CREATE INDEX idx_profile_education_dates ON profile_education(start_date DESC, end_date DESC);
+CREATE INDEX idx_profile_projects_user_id ON profile_projects(user_id);
+CREATE INDEX idx_profile_projects_dates ON profile_projects(start_date DESC, end_date DESC);
 ```
 
 ## Triggers & Automation

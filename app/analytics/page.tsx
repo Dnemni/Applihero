@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { Header } from '@/components/header';
+import { OnboardingOverlay, type OnboardingStep } from '@/components/onboarding-overlay';
 import { StatsCard } from '@/components/analytics/StatsCard';
 import { StatusChart } from '@/components/analytics/StatusChart';
 import { TimelineChart } from '@/components/analytics/TimelineChart';
@@ -37,16 +38,73 @@ interface AnalyticsData {
   completionRates: CompletionRates;
 }
 
+const ANALYTICS_ONBOARDING_KEY = 'applihero-analytics-onboarding-completed';
+
+const analyticsOnboardingSteps: OnboardingStep[] = [
+  {
+    title: 'Welcome to Analytics!',
+    description:
+      'This page gives you insights into your job search progress, application statuses, and more. Let’s take a quick tour!',
+    position: 'center',
+  },
+  {
+    title: 'Overview Cards',
+    description: 'See your total applications, in progress, submitted, and more at a glance.',
+    position: 'top',
+    targetId: 'analytics-overview-cards',
+  },
+  {
+    title: 'Charts & Trends',
+    description: 'Visualize your application statuses, timelines, and company breakdowns to spot trends.',
+    position: 'top',
+    targetId: 'analytics-charts',
+  },
+  {
+    title: 'Insights',
+    description: 'Get actionable insights and tips to improve your job search.',
+    position: 'top',
+    targetId: 'analytics-insights',
+  },
+  {
+    title: 'Completion Rates',
+    description: 'Track your progress on questions, resumes, and cover letters.',
+    position: 'top',
+    targetId: 'analytics-completion-rates',
+  },
+  {
+    title: 'All Set!',
+    description:
+      'You’re ready to use analytics to optimize your job search. You can revisit this page anytime for updated insights.',
+    position: 'center',
+  },
+];
+
 export default function AnalyticsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   useEffect(() => {
     checkAuthAndLoadData();
   }, []);
+
+  useEffect(() => {
+    if (!data || window.localStorage.getItem(ANALYTICS_ONBOARDING_KEY) === 'true') {
+      return;
+    }
+
+    setShowOnboarding(true);
+    setOnboardingStep(0);
+  }, [data]);
+
+  function completeAnalyticsOnboarding() {
+    window.localStorage.setItem(ANALYTICS_ONBOARDING_KEY, 'true');
+    setShowOnboarding(false);
+  }
 
   async function checkAuthAndLoadData() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -150,7 +208,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        <div id="analytics-overview-cards" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <StatsCard
             title="Total Applications"
             value={overview.total}
@@ -190,7 +248,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Charts Row 1 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div id="analytics-charts" className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           <StatusChart data={statusBreakdown} />
           <TimelineChart data={timeline} />
         </div>
@@ -205,7 +263,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Insights */}
-        <div className="mb-6">
+        <div id="analytics-insights" className="mb-6">
           <InsightsPanel
             avgDaysToSubmit={overview.avgDaysToSubmit}
             completionRates={completionRates}
@@ -213,7 +271,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Completion Rates Section */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div id="analytics-completion-rates" className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Completion Rates</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="p-4 rounded-lg bg-gray-50">
@@ -272,7 +330,18 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {showOnboarding && (
+        <OnboardingOverlay
+          steps={analyticsOnboardingSteps}
+          currentStep={onboardingStep}
+          onNext={() => setOnboardingStep((step) => step + 1)}
+          onPrevious={() => setOnboardingStep((step) => Math.max(0, step - 1))}
+          onSkip={completeAnalyticsOnboarding}
+          onComplete={completeAnalyticsOnboarding}
+          showProgress
+        />
+      )}
     </div>
   );
 }
-

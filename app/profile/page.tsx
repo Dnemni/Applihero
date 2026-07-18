@@ -236,6 +236,24 @@ export default function ProfilePage() {
       position: "right",
     },
     {
+      title: "Review Your Skills",
+      description: "Add, edit, or remove your skills here. These help the AI understand your strengths.",
+      targetId: "skills-section",
+      position: "center",
+    },
+    {
+      title: "Add Experience",
+      description: "Add your work experience, including achievements for each role.",
+      targetId: "experience-section",
+      position: "center",
+    },
+    {
+      title: "Add Education",
+      description: "Add your educational background, degrees, and honors.",
+      targetId: "education-section",
+      position: "center",
+    },
+    {
       title: "Save Your Profile 💾",
       description: "Perfect! Now click the 'Save Profile' button below to save your changes. The tutorial will automatically take you to the dashboard next!",
       targetId: "save-profile-button",
@@ -653,6 +671,8 @@ export default function ProfilePage() {
               onSave={handleSaveProfile}
               onCancel={loadProfile}
               saving={saving}
+              bioInputId="bio-section"
+              saveButtonId="save-profile-button"
             />
 
             {/* Documents (restored original rich upload UI) */}
@@ -849,9 +869,15 @@ export default function ProfilePage() {
             {/* Enhanced Profile Data Sections */}
             {profile && (
               <>
-                <SkillsSection ref={skillsRef} userId={profile.id} editable={true} />
-                <ExperienceSection ref={experienceRef} userId={profile.id} editable={true} />
-                <EducationSection ref={educationRef} userId={profile.id} editable={true} />
+                <div id="skills-section">
+                  <SkillsSection ref={skillsRef} userId={profile.id} editable={true} />
+                </div>
+                <div id="experience-section">
+                  <ExperienceSection ref={experienceRef} userId={profile.id} editable={true} />
+                </div>
+                <div id="education-section">
+                  <EducationSection ref={educationRef} userId={profile.id} editable={true} />
+                </div>
               </>
             )}
           </div>

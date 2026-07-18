@@ -11,6 +11,8 @@ interface ProfileInfoCardProps {
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
+  bioInputId?: string;
+  saveButtonId?: string;
 }
 
 export function ProfileInfoCard({
@@ -24,6 +26,8 @@ export function ProfileInfoCard({
   onSave,
   onCancel,
   saving,
+  bioInputId,
+  saveButtonId,
 }: ProfileInfoCardProps) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col h-full">
@@ -69,6 +73,7 @@ export function ProfileInfoCard({
         </div>
         <div>
           <textarea
+            id={bioInputId}
             rows={3}
             value={bio}
             onChange={e => onBioChange(e.target.value)}
@@ -86,13 +91,17 @@ export function ProfileInfoCard({
         >
           Cancel
         </button>
-        <button
-          onClick={onSave}
-          disabled={saving}
-          className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white hover:from-indigo-700 hover:to-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {saving ? "Saving..." : "Save changes"}
-        </button>
+        <span className="relative inline-flex">
+          <button
+            id={saveButtonId}
+            data-onboarding-target="save-profile"
+            onClick={onSave}
+            disabled={saving}
+            className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white hover:from-indigo-700 hover:to-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed focus:z-10 mt-2"
+          >
+            {saving ? "Saving..." : "Save changes"}
+          </button>
+        </span>
       </div>
     </section>
   );

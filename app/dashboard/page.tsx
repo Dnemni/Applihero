@@ -46,13 +46,18 @@ export default function DashboardPage() {
   const onboardingSteps = [
     {
       title: "Profile Complete! 🎉",
-      description: "Excellent work setting up your profile! Now let's explore your dashboard where you'll manage all your job applications. Click 'Next' to continue.",
+      description: "Excellent work setting up your profile! Now let's explore your dashboard where you'll manage all your job applications. You'll also have access to analytics to track your progress. Click 'Next' to continue.",
       position: "center" as const,
     },
     {
       title: "Your Dashboard",
       description: "This is your command center. Here you'll see all your job applications, their status, and when you last worked on them. Each card represents a different job you're tracking.",
       targetId: "dashboard-content",
+      position: "center" as const,
+    },
+    {
+      title: "Analytics Overview",
+      description: "You can view your application analytics by clicking the 'Analytics' tab in the sidebar. The analytics page provides insights into your job search performance, application statuses, and more. You'll see a quick tour the first time you visit.",
       position: "center" as const,
     },
     {

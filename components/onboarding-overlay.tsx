@@ -45,15 +45,41 @@ export function OnboardingOverlay({
     if (step?.targetId) {
       const target = document.getElementById(step.targetId);
       if (target) {
+        // Clear any previous position while scrolling
+        setTargetRect(null);
+        
         // Scroll element into view
         target.scrollIntoView({ behavior: "smooth", block: "center" });
 
-        // Get element position after scroll completes
-        setTimeout(() => {
+        let hasUpdated = false;
+
+        const updatePosition = () => {
+          if (hasUpdated) return;
+          hasUpdated = true;
+          
           const rect = target.getBoundingClientRect();
           setTargetRect(rect);
           calculateTooltipPosition(rect, step.position || "right");
-        }, 500);
+        };
+
+        // Listen for scroll to complete
+        const scrollEndHandler = () => {
+          // Small delay to ensure layout is stable
+          setTimeout(updatePosition, 50);
+        };
+
+        // Add scrollend event listener (fires when smooth scroll completes)
+        document.addEventListener('scrollend', scrollEndHandler, { once: true });
+        window.addEventListener('scrollend', scrollEndHandler, { once: true });
+
+        // Fallback timeout in case scrollend doesn't fire (older browsers or no scroll needed)
+        const fallbackTimeout = setTimeout(updatePosition, 800);
+
+        return () => {
+          document.removeEventListener('scrollend', scrollEndHandler);
+          window.removeEventListener('scrollend', scrollEndHandler);
+          clearTimeout(fallbackTimeout);
+        };
       } else {
         setTargetRect(null);
       }

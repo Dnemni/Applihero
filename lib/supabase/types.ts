@@ -82,6 +82,7 @@ export interface Database {
           job_title: string;
           company_name: string;
           job_description: string | null;
+          discovery_job_id: string | null;
           status: JobStatus;
           created_at: string;
           updated_at: string;
@@ -93,6 +94,7 @@ export interface Database {
           job_title: string;
           company_name: string;
           job_description?: string | null;
+          discovery_job_id?: string | null;
           status?: JobStatus;
           created_at?: string;
           updated_at?: string;
@@ -104,11 +106,125 @@ export interface Database {
           job_title?: string;
           company_name?: string;
           job_description?: string | null;
+          discovery_job_id?: string | null;
           status?: JobStatus;
           created_at?: string;
           updated_at?: string;
           last_touched_at?: string;
         };
+      };
+      job_sources: {
+        Row: {
+          id: string;
+          provider: string;
+          external_key: string;
+          company_name: string;
+          config: Json;
+          enabled: boolean;
+          last_sync_started_at: string | null;
+          last_sync_completed_at: string | null;
+          last_sync_error: string | null;
+          consecutive_failures: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          provider: string;
+          external_key: string;
+          company_name: string;
+          config?: Json;
+          enabled?: boolean;
+          last_sync_started_at?: string | null;
+          last_sync_completed_at?: string | null;
+          last_sync_error?: string | null;
+          consecutive_failures?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['job_sources']['Insert']>;
+      };
+      discovery_jobs: {
+        Row: {
+          id: string;
+          source_id: string;
+          source_job_id: string;
+          company_name: string;
+          title: string;
+          description: string;
+          description_html: string | null;
+          location: string | null;
+          workplace_type: string | null;
+          employment_type: string | null;
+          departments: string[];
+          source_url: string;
+          apply_url: string;
+          source_published_at: string | null;
+          source_updated_at: string | null;
+          application_deadline: string | null;
+          discovered_at: string;
+          last_verified_at: string;
+          status: 'open' | 'unverified' | 'closed';
+          consecutive_misses: number;
+          raw_payload: Json;
+          parsed_requirements: Json;
+          parser_version: string;
+          content_hash: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          source_id: string;
+          source_job_id: string;
+          company_name: string;
+          title: string;
+          description?: string;
+          description_html?: string | null;
+          location?: string | null;
+          workplace_type?: string | null;
+          employment_type?: string | null;
+          departments?: string[];
+          source_url: string;
+          apply_url: string;
+          source_published_at?: string | null;
+          source_updated_at?: string | null;
+          application_deadline?: string | null;
+          discovered_at?: string;
+          last_verified_at?: string;
+          status?: 'open' | 'unverified' | 'closed';
+          consecutive_misses?: number;
+          raw_payload?: Json;
+          parsed_requirements?: Json;
+          parser_version?: string;
+          content_hash: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['discovery_jobs']['Insert']>;
+      };
+      job_match_runs: {
+        Row: {
+          id: string;
+          user_id: string;
+          discovery_job_id: string;
+          profile_hash: string;
+          job_hash: string;
+          matcher_version: string;
+          result: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          discovery_job_id: string;
+          profile_hash: string;
+          job_hash: string;
+          matcher_version: string;
+          result: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['job_match_runs']['Insert']>;
       };
       questions: {
         Row: {

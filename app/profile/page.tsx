@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
 import type { Profile } from "@/lib/supabase/types";
+import { getPasswordSetMetadata } from "@/lib/auth/password-status";
 import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overlay";
 import { Header } from "@/components/header";
 import { toast } from "@/components/toast";
@@ -311,9 +312,12 @@ export default function ProfilePage() {
         throw new Error("Current password is incorrect");
       }
 
+      const { data: { user } } = await supabase.auth.getUser();
+
       // Update password
       const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
+        data: getPasswordSetMetadata(user),
       });
 
       if (updateError) throw updateError;

@@ -4,6 +4,7 @@ import { useState, FormEvent, useEffect } from "react";
 import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { getPasswordSetMetadata } from "@/lib/auth/password-status";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -43,8 +44,10 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
       const { error } = await supabase.auth.updateUser({
         password: password,
+        data: getPasswordSetMetadata(user),
       });
 
       if (error) throw error;

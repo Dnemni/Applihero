@@ -29,6 +29,7 @@ export interface Database {
           transcript_text: string | null;
           email_notifications: boolean;
           onboarding_completed: boolean;
+          password_set_at: string | null;
           marketing_emails: boolean;
           active: boolean;
           created_at: string;
@@ -47,6 +48,7 @@ export interface Database {
           transcript_text: string | null;
           email_notifications?: boolean;
           onboarding_completed?: boolean;
+          password_set_at?: string | null;
           marketing_emails?: boolean;
           active?: boolean;
           created_at?: string;
@@ -65,6 +67,7 @@ export interface Database {
           transcript_text?: string | null;
           email_notifications?: boolean;
           onboarding_completed?: boolean;
+          password_set_at?: string | null;
           marketing_emails?: boolean;
           active?: boolean;
           created_at?: string;

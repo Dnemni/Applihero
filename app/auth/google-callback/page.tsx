@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase/client';
 import { getStoredOAuthState, clearOAuthState } from '@/lib/google-oauth';
 import { ProfileService } from '@/lib/supabase/services';
 import { initializeOnboarding } from '@/lib/onboarding-state';
+import { userMetadataIndicatesPassword } from '@/lib/auth/password-status';
 
 export default function GoogleCallbackPage() {
   const router = useRouter();
@@ -54,7 +55,7 @@ export default function GoogleCallbackPage() {
           );
         }
 
-        const { idToken, accessToken } = await tokenResponse.json();
+        const { idToken } = await tokenResponse.json();
 
         if (!idToken) {
           throw new Error('No ID token received');
@@ -80,26 +81,25 @@ export default function GoogleCallbackPage() {
         // Clear OAuth state from storage
         clearOAuthState();
 
-        // Check if this is a new OAuth-only user
+        // Check if this user has ever manually enabled password login
         try {
+          const accessToken = authData.session?.access_token;
           const response = await fetch('/api/auth/check-identities', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            },
             body: JSON.stringify({ userId: authData.user.id }),
           });
 
           if (response.ok) {
             const identitiesData = await response.json();
-            console.log('User identities:', identitiesData);
-            
-            const hasEmailAuth = identitiesData.hasPassword;
+            const hasPasswordLogin =
+              identitiesData.hasPassword || userMetadataIndicatesPassword(authData.user);
 
-            console.log('Has email auth:', hasEmailAuth);
-
-            // If this is an OAuth-only user (no email/password auth), redirect to set password
-            if (!hasEmailAuth) {
-              console.log('OAuth-only user detected, redirecting to set-password');
-              
+            // If the user has never set a password, offer the one-time setup
+            if (!hasPasswordLogin) {
               // Extract name from Google metadata
               const name = authData.user.user_metadata?.full_name || authData.user.email?.split('@')[0] || 'User';
               const [firstName, ...lastNameParts] = name.split(' ');

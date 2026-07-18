@@ -8,6 +8,7 @@ import { ProfileService } from "@/lib/supabase/services";
 import { initializeOnboarding } from "@/lib/onboarding-state";
 import { getGoogleOAuthURL, generateState, storeOAuthState } from "@/lib/google-oauth";
 import { getLinkedInOAuthURL, generateLinkedInState, storeLinkedInOAuthState } from "@/lib/linkedin-oauth";
+import { PASSWORD_LOGIN_ENABLED_KEY, PASSWORD_SET_AT_KEY } from "@/lib/auth/password-status";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -51,6 +52,8 @@ export default function SignupPage() {
             first_name: firstName,
             last_name: lastName,
             full_name: `${firstName} ${lastName}`,
+            [PASSWORD_LOGIN_ENABLED_KEY]: true,
+            [PASSWORD_SET_AT_KEY]: new Date().toISOString(),
           },
           emailRedirectTo: `${window.location.origin}/auth/callback`,
         },

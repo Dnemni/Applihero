@@ -4,6 +4,7 @@ import { useState, FormEvent, useEffect } from "react";
 import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { getPasswordSetMetadata, userMetadataIndicatesPassword } from "@/lib/auth/password-status";
 
 export default function SetPasswordPage() {
   const router = useRouter();
@@ -30,15 +31,23 @@ export default function SetPasswordPage() {
 
       setUserEmail(user.email || "");
 
-      // Check if user already has a password (has email provider)
-      const { data: identities } = await supabase
-        .from("auth.identities")
-        .select("provider")
-        .eq("user_id", user.id);
+      if (userMetadataIndicatesPassword(user)) {
+        router.push("/dashboard");
+        return;
+      }
 
-      const hasEmailProvider = identities?.some((i: { provider: string; }) => i.provider === "email");
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/api/auth/check-identities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const passwordStatus = response.ok ? await response.json() : null;
       
-      if (hasEmailProvider) {
+      if (passwordStatus?.hasPassword) {
         // User already has password, redirect to dashboard
         router.push("/dashboard");
         return;
@@ -68,9 +77,12 @@ export default function SetPasswordPage() {
     setLoading(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+
       // Update user password - this will create email provider identity
       const { error } = await supabase.auth.updateUser({
         password: password,
+        data: getPasswordSetMetadata(user),
       });
 
       if (error) throw error;

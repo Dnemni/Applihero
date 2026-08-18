@@ -5,13 +5,15 @@ import { syncDueSources } from "@/lib/discovery/sync";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const INTERACTIVE_SOURCE_LIMIT = 36;
+
 export async function POST(request: NextRequest) {
   try {
     const user = await requireApiUser(request);
     const body = await request.json().catch(() => ({}));
     const sourceId = typeof body.sourceId === "string" ? body.sourceId : undefined;
     const startedAt = Date.now();
-    const results = await syncDueSources({ force: true, limit: sourceId ? 1 : 12, sourceId, userId: user.id });
+    const results = await syncDueSources({ force: true, limit: sourceId ? 1 : INTERACTIVE_SOURCE_LIMIT, sourceId, userId: user.id });
     return NextResponse.json({
       synced: results.reduce((sum, result) => sum + result.verified, 0),
       discovered: results.reduce((sum, result) => sum + result.discovered, 0),

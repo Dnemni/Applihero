@@ -5,6 +5,7 @@ import './globals.css';
 import { ToastContainer } from '@/components/toast';
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://www.applihero.com'),
   title: 'Applihero - AI-Powered Job Application Coaching',
   description: 'AI-powered coaching to land your dream job',
   icons: {

@@ -1,0 +1,36 @@
+name: Sync discovery jobs
+
+on:
+  schedule:
+    # Every 15 minutes, offset from the top of the hour to reduce scheduler delays.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: discovery-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Scan watched companies and send due digests
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Trigger secure production sync
+        env:
+          DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover
+        run: |
+          if [ -z "$DISCOVERY_CRON_SECRET" ]; then
+            echo "DISCOVERY_CRON_SECRET is not configured."
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --max-time 300 \
+            --retry 2 \
+            --retry-all-errors \
+            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" \
+            "$DISCOVERY_CRON_URL"

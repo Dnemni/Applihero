@@ -13,7 +13,7 @@ import type {
 
 // Increment whenever deterministic eligibility semantics change so stored
 // recommendations are recalculated before they are shown again.
-export const MATCHER_VERSION = "eligibility-evidence-v22";
+export const MATCHER_VERSION = "eligibility-evidence-v23";
 
 const SENSITIVE_CATEGORIES = new Set(["work_authorization", "availability"]);
 
@@ -314,6 +314,17 @@ function deterministicRequirementFit(requirement: ParsedRequirement, background:
   };
 }
 
+function requiresExplicitEvidence(requirement: RequirementFit) {
+  if (requirement.priority !== "minimum") return false;
+  const text = requirement.requirement.toLowerCase();
+  if (requirement.category === "education") return /\b(?:must|required|currently pursuing|bachelor|master|ph\.?d|degree)\b/.test(text);
+  if (requirement.category === "technical_skill") return /\b(?:must|required|minimum qualification|proficient|expertise in|strong experience)\b/.test(text);
+  if (requirement.category === "experience" || requirement.category === "domain_experience") {
+    return /\b(?:must|required|minimum qualification|at least|\d+\+?\s*(?:years?|yrs?))\b/.test(text);
+  }
+  return false;
+}
+
 function summarizeRequirements(requirements: RequirementFit[]) {
   let supportedCount = 0;
   let conflicts = 0;
@@ -327,15 +338,14 @@ function summarizeRequirements(requirements: RequirementFit[]) {
   }
 
   const hardEligibilityCategories = ["graduation_window", "education", "location", "work_authorization", "availability"];
-  const hardEvidenceCategories = ["education", "technical_skill", "experience", "domain_experience"];
-  // An absent résumé quote can be uncertainty for a preference or a generic
-  // trait. It is not uncertainty for an explicit, role-defining minimum such
-  // as civil engineering experience or a required programming language: those
-  // are disqualifying until the applicant can substantiate them.
+  // An absent résumé quote is usually an evidence gap, not a contradiction.
+  // Treat it as disqualifying only when the posting itself makes the evidence
+  // an explicit, non-negotiable requirement. Direct factual contradictions
+  // (for example, degree discipline or graduation timing) remain hard stops.
   const hardConflicts = requirements.filter(requirement =>
     requirement.priority === "minimum" && (
       (requirement.status === "conflicting" && hardEligibilityCategories.includes(requirement.category)) ||
-      (requirement.status === "not_evidenced" && hardEvidenceCategories.includes(requirement.category))
+      (requirement.status === "not_evidenced" && requiresExplicitEvidence(requirement))
     )
   );
   const minimums = requirements.filter(requirement => requirement.priority === "minimum" && requirement.status !== "needs_confirmation");
@@ -371,10 +381,9 @@ function summarizeRequirements(requirements: RequirementFit[]) {
 }
 
 function eligibilityAssessment(requirements: RequirementFit[]): EligibilityAssessment {
-  const strictEvidenceCategories = new Set(["education", "technical_skill", "experience", "domain_experience"]);
   const conflicts = requirements.filter(item => item.priority === "minimum" && (
     item.status === "conflicting" ||
-    (item.status === "not_evidenced" && strictEvidenceCategories.has(item.category))
+    (item.status === "not_evidenced" && requiresExplicitEvidence(item))
   ));
   if (conflicts.length) {
     return {

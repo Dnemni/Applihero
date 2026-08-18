@@ -7,8 +7,8 @@ import type { DiscoveryJob, QuickFit } from "./types";
 
 const MAX_RECOMMENDATIONS_PER_SOURCE = 30;
 const MIN_RECOMMENDATION_SCORE = 10;
-const MAX_CANDIDATES_PER_USER = 60;
-const FALLBACK_JOBS_TO_STORE = 10;
+const MAX_SOURCE_CATALOG_JOBS = 100;
+const MAX_CANDIDATES_PER_USER = MAX_SOURCE_CATALOG_JOBS;
 
 const db = () => {
   if (!supabaseAdmin) throw new Error("Supabase admin client is not configured");
@@ -69,6 +69,28 @@ async function upsertInChunks(table: string, rows: any[], options: Record<string
     const { error } = await db().from(table).upsert(rows.slice(index, index + 100), options);
     if (error) throw error;
   }
+}
+
+async function upsertChangedDiscoveryJobs(sourceId: string, rows: any[]) {
+  if (!rows.length) return;
+  const existingByKey = new Map<string, { content_hash: string | null; status: string | null }>();
+  for (let index = 0; index < rows.length; index += 100) {
+    const sourceJobIds = rows.slice(index, index + 100).map(row => row.source_job_id);
+    const { data, error } = await db().from("discovery_jobs")
+      .select("source_job_id,content_hash,status")
+      .eq("source_id", sourceId)
+      .in("source_job_id", sourceJobIds);
+    if (error) throw error;
+    for (const job of data || []) existingByKey.set(job.source_job_id, job);
+  }
+
+  // The database constraint prevents duplicates; this additionally avoids a
+  // redundant write when a still-live posting has not changed.
+  const changed = rows.filter(row => {
+    const existing = existingByKey.get(row.source_job_id);
+    return !existing || existing.content_hash !== row.content_hash || existing.status !== "open";
+  });
+  await upsertInChunks("discovery_jobs", changed, { onConflict: "source_id,source_job_id" });
 }
 
 async function createInAppAlerts(subscription: Subscription, newRecommendations: Array<{ jobId: string; quickFit: QuickFit; job: any }>) {
@@ -161,13 +183,18 @@ export async function syncSource(source: any): Promise<SyncResult> {
     const titleFiltered = includeTitleTerms.length
       ? fetched.filter(job => includeTitleTerms.some((term: string) => job.title.toLowerCase().includes(term)))
       : fetched;
+    // Keep the shared database catalog bounded to recent openings. We still
+    // fetch the board first, so a newly posted role cannot be skipped just
+    // because an older board has thousands of open records.
+    const newestSourceJobs = [...titleFiltered]
+      .sort((a, b) => new Date(b.source_published_at || 0).getTime() - new Date(a.source_published_at || 0).getTime())
+      .slice(0, MAX_SOURCE_CATALOG_JOBS);
 
     const candidatesByUser = new Map<string, NormalizedSourceJob[]>();
-    const candidatesToHydrate = new Map<string, NormalizedSourceJob>();
+    const candidatesToHydrate = new Map<string, NormalizedSourceJob>(newestSourceJobs.map(job => [job.source_job_id, job]));
     for (const item of subscriberProfiles) {
-      const candidates = titleFiltered
+      const candidates = newestSourceJobs
         .filter(rawJob => assessDiscoveryEligibility(rawJob, item.discovery).eligible)
-        .sort((a, b) => new Date(b.source_published_at || 0).getTime() - new Date(a.source_published_at || 0).getTime())
         .slice(0, MAX_CANDIDATES_PER_USER);
       candidatesByUser.set(item.subscription.user_id, candidates);
       candidates.forEach(job => candidatesToHydrate.set(job.source_job_id, job));
@@ -180,8 +207,14 @@ export async function syncSource(source: any): Promise<SyncResult> {
       hydrated.forEach(job => hydratedByKey.set(job.source_job_id, prepareSourceJob(job)));
     }
 
+    const sourceCatalog = new Map<string, NormalizedSourceJob>();
+    for (const rawJob of newestSourceJobs) {
+      const hydrated = hydratedByKey.get(rawJob.source_job_id) || prepareSourceJob(rawJob);
+      sourceCatalog.set(hydrated.source_job_id, hydrated);
+    }
+
     const evaluatedByUser = new Map<string, EvaluatedSourceJobs>();
-    const union = new Map<string, NormalizedSourceJob>();
+    const evaluatedUnion = new Map<string, NormalizedSourceJob>();
     for (const item of subscriberProfiles) {
       const evaluated: EvaluatedJob[] = [];
       for (const rawJob of candidatesByUser.get(item.subscription.user_id) || []) {
@@ -203,23 +236,11 @@ export async function syncSource(source: any): Promise<SyncResult> {
       // shortlist. This lets an intentional company or keyword search reveal
       // lower-scoring roles without weakening the default discovery feed.
       evaluatedByUser.set(item.subscription.user_id, { catalog: evaluated, alertable });
-      evaluated.forEach(item => union.set(item.job.source_job_id, item.job));
-    }
-
-    const fallback = new Map<string, NormalizedSourceJob>();
-    if (!union.size) {
-      const newest = [...titleFiltered]
-        .sort((a, b) => new Date(b.source_published_at || 0).getTime() - new Date(a.source_published_at || 0).getTime())
-        .slice(0, FALLBACK_JOBS_TO_STORE);
-      for (let index = 0; index < newest.length; index += 8) {
-        const hydrated = await Promise.all(newest.slice(index, index + 8).map(job => hydratedByKey.get(job.source_job_id) || hydrateSourceJob(sourceForFetch, job)));
-        hydrated.forEach(job => fallback.set(job.source_job_id, prepareSourceJob(job)));
-      }
+      evaluated.forEach(item => evaluatedUnion.set(item.job.source_job_id, item.job));
     }
 
     const now = new Date().toISOString();
-    const jobsToStore = new Map([...fallback, ...union]);
-    const persistedJobs = Array.from(jobsToStore.values()).map(job => ({
+    const persistedJobs = Array.from(sourceCatalog.values()).map(job => ({
       ...job,
       source_id: source.id,
       company_name: source.company_name,
@@ -227,15 +248,13 @@ export async function syncSource(source: any): Promise<SyncResult> {
       consecutive_misses: 0,
       last_verified_at: now,
     }));
-    if (persistedJobs.length) {
-      await upsertInChunks("discovery_jobs", persistedJobs, { onConflict: "source_id,source_job_id" });
-    }
+    await upsertChangedDiscoveryJobs(source.id, persistedJobs);
     let storedJobs: any[] = [];
-    if (jobsToStore.size) {
+    if (sourceCatalog.size) {
       const { data, error: storedError } = await database.from("discovery_jobs")
         .select("id, source_job_id, title, company_name, location")
         .eq("source_id", source.id)
-        .in("source_job_id", Array.from(jobsToStore.keys()));
+        .in("source_job_id", Array.from(sourceCatalog.keys()));
       if (storedError) throw storedError;
       storedJobs = data || [];
     }
@@ -245,9 +264,11 @@ export async function syncSource(source: any): Promise<SyncResult> {
     for (const item of subscriberProfiles) {
       const evaluated = evaluatedByUser.get(item.subscription.user_id) || { catalog: [], alertable: [] };
       const { data: existingRecommendations, error: existingError } = await database.from("user_job_recommendations")
-        .select("discovery_job_id").eq("user_id", item.subscription.user_id).eq("source_id", source.id);
+        .select("discovery_job_id,fit_score,fit_band,eligibility_status,quick_fit,active")
+        .eq("user_id", item.subscription.user_id).eq("source_id", source.id);
       if (existingError) throw existingError;
       const existingIds = new Set((existingRecommendations || []).map((row: any) => row.discovery_job_id));
+      const existingByJobId = new Map((existingRecommendations || []).map((row: any) => [row.discovery_job_id, row]));
       const recommendationRows = evaluated.catalog.flatMap(entry => {
         const stored = storedByKey.get(entry.job.source_job_id) as any;
         return stored ? [{
@@ -265,9 +286,19 @@ export async function syncSource(source: any): Promise<SyncResult> {
       const activeIds = recommendationRows.map(row => row.discovery_job_id);
       await database.from("user_job_recommendations").update({ active: false, last_evaluated_at: now })
         .eq("user_id", item.subscription.user_id).eq("source_id", source.id)
+        .eq("active", true)
         .not("discovery_job_id", "in", `(${activeIds.join(",") || "00000000-0000-0000-0000-000000000000"})`);
-      if (recommendationRows.length) {
-        await upsertInChunks("user_job_recommendations", recommendationRows, { onConflict: "user_id,discovery_job_id" });
+      const changedRecommendations = recommendationRows.filter(row => {
+        const existing = existingByJobId.get(row.discovery_job_id) as any;
+        return !existing ||
+          existing.active !== true ||
+          existing.fit_score !== row.fit_score ||
+          existing.fit_band !== row.fit_band ||
+          existing.eligibility_status !== row.eligibility_status ||
+          JSON.stringify(existing.quick_fit) !== JSON.stringify(row.quick_fit);
+      });
+      if (changedRecommendations.length) {
+        await upsertInChunks("user_job_recommendations", changedRecommendations, { onConflict: "user_id,discovery_job_id" });
       }
       // Low-confidence catalog roles are useful when the user deliberately
       // searches a company, but should never create a proactive alert.
@@ -291,11 +322,11 @@ export async function syncSource(source: any): Promise<SyncResult> {
       company: source.company_name,
       careerUrl: source.career_url,
       discovered,
-      verified: union.size,
-      matched: union.size,
-      fallbackImported: fallback.size,
+      verified: sourceCatalog.size,
+      matched: evaluatedUnion.size,
+      fallbackImported: evaluatedUnion.size ? 0 : sourceCatalog.size,
       fetched: fetched.length,
-      rejected: fetched.length - union.size,
+      rejected: fetched.length - sourceCatalog.size,
       durationMs: Date.now() - started,
     };
   } catch (error) {

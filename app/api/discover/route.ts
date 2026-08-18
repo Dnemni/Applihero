@@ -9,6 +9,11 @@ import { assessDiscoveryEligibility, getDiscoveryApplicantProfile } from "@/lib/
 
 export const dynamic = "force-dynamic";
 
+// The sync stores a wider per-user company catalog so intentional searches can
+// explore it. Keep the normal discovery feed focused on roles with a baseline
+// fit signal; explicit filters opt into the broader, still non-conflicting set.
+const DEFAULT_FEED_MINIMUM_SCORE = 10;
+
 function includes(value: string | null | undefined, query: string) {
   return (value || "").toLowerCase().includes(query.toLowerCase());
 }
@@ -42,11 +47,14 @@ export async function GET(request: NextRequest) {
     const workplace = request.nextUrl.searchParams.get("workplace")?.trim() || "";
     const freshness = Number(request.nextUrl.searchParams.get("freshness") || 0);
     const cutoff = freshness > 0 ? Date.now() - freshness * 24 * 60 * 60 * 1000 : 0;
+    const isIntentionalBrowse = Boolean(query || company || location || workplace || freshness);
 
     const filtered = recommendations.filter(({ job, quickFit }) => {
-      // Discovery's open-role list is deliberately actionable: a role needs a
-      // positive score and must not have an identified hard eligibility conflict.
-      if (quickFit.score <= 0 || quickFit.band === "likely_conflict" || quickFit.eligibility.status === "conflict") return false;
+      // Hard conflicts are never actionable. Outside an explicit search, keep
+      // the feed focused; a company or keyword filter can inspect the remaining
+      // eligible catalog even when a role is below that default threshold.
+      if (quickFit.band === "likely_conflict" || quickFit.eligibility.status === "conflict") return false;
+      if (!isIntentionalBrowse && (quickFit.score === null || quickFit.score < DEFAULT_FEED_MINIMUM_SCORE)) return false;
       if (query && !includes(job.title, query) && !includes(job.company_name, query) && !includes(job.description, query)) return false;
       if (company && !includes(job.company_name, company)) return false;
       if (location && !includes(job.location, location)) return false;

@@ -37,6 +37,10 @@ type Subscription = {
 };
 
 type EvaluatedJob = { job: NormalizedSourceJob; quickFit: QuickFit };
+type EvaluatedSourceJobs = {
+  catalog: EvaluatedJob[];
+  alertable: EvaluatedJob[];
+};
 
 function readableError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -176,25 +180,30 @@ export async function syncSource(source: any): Promise<SyncResult> {
       hydrated.forEach(job => hydratedByKey.set(job.source_job_id, prepareSourceJob(job)));
     }
 
-    const evaluatedByUser = new Map<string, EvaluatedJob[]>();
+    const evaluatedByUser = new Map<string, EvaluatedSourceJobs>();
     const union = new Map<string, NormalizedSourceJob>();
     for (const item of subscriberProfiles) {
       const evaluated: EvaluatedJob[] = [];
       for (const rawJob of candidatesByUser.get(item.subscription.user_id) || []) {
         const job = hydratedByKey.get(rawJob.source_job_id) || prepareSourceJob(rawJob);
         const quickFit = buildQuickFit(asDiscoveryJob(job, source), item.background);
-        if (
-          quickFit.score === null ||
-          quickFit.score < MIN_RECOMMENDATION_SCORE ||
-          quickFit.band === "likely_conflict" ||
-          quickFit.eligibility.status === "conflict"
-        ) continue;
         evaluated.push({ job, quickFit });
       }
-      evaluated.sort((a, b) => (b.quickFit.score ?? -1) - (a.quickFit.score ?? -1));
-      const shortlist = evaluated.slice(0, MAX_RECOMMENDATIONS_PER_SOURCE);
-      evaluatedByUser.set(item.subscription.user_id, shortlist);
-      shortlist.forEach(item => union.set(item.job.source_job_id, item.job));
+      const alertable = evaluated
+        .filter(item =>
+          item.quickFit.score !== null &&
+          item.quickFit.score >= MIN_RECOMMENDATION_SCORE &&
+          item.quickFit.band !== "likely_conflict" &&
+          item.quickFit.eligibility.status !== "conflict"
+        )
+        .sort((a, b) => (b.quickFit.score ?? -1) - (a.quickFit.score ?? -1))
+        .slice(0, MAX_RECOMMENDATIONS_PER_SOURCE);
+
+      // Save the eligible, per-user company catalog as well as the alertable
+      // shortlist. This lets an intentional company or keyword search reveal
+      // lower-scoring roles without weakening the default discovery feed.
+      evaluatedByUser.set(item.subscription.user_id, { catalog: evaluated, alertable });
+      evaluated.forEach(item => union.set(item.job.source_job_id, item.job));
     }
 
     const fallback = new Map<string, NormalizedSourceJob>();
@@ -234,12 +243,12 @@ export async function syncSource(source: any): Promise<SyncResult> {
 
     let discovered = 0;
     for (const item of subscriberProfiles) {
-      const shortlist = evaluatedByUser.get(item.subscription.user_id) || [];
+      const evaluated = evaluatedByUser.get(item.subscription.user_id) || { catalog: [], alertable: [] };
       const { data: existingRecommendations, error: existingError } = await database.from("user_job_recommendations")
         .select("discovery_job_id").eq("user_id", item.subscription.user_id).eq("source_id", source.id);
       if (existingError) throw existingError;
       const existingIds = new Set((existingRecommendations || []).map((row: any) => row.discovery_job_id));
-      const recommendationRows = shortlist.flatMap(entry => {
+      const recommendationRows = evaluated.catalog.flatMap(entry => {
         const stored = storedByKey.get(entry.job.source_job_id) as any;
         return stored ? [{
           user_id: item.subscription.user_id,
@@ -260,7 +269,9 @@ export async function syncSource(source: any): Promise<SyncResult> {
       if (recommendationRows.length) {
         await upsertInChunks("user_job_recommendations", recommendationRows, { onConflict: "user_id,discovery_job_id" });
       }
-      const newlyRecommended = shortlist.flatMap(entry => {
+      // Low-confidence catalog roles are useful when the user deliberately
+      // searches a company, but should never create a proactive alert.
+      const newlyRecommended = evaluated.alertable.flatMap(entry => {
         const stored = storedByKey.get(entry.job.source_job_id) as any;
         return stored && !existingIds.has(stored.id) ? [{ jobId: stored.id, quickFit: entry.quickFit, job: stored }] : [];
       });

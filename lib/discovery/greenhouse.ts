@@ -52,7 +52,7 @@ function inferEmploymentType(job: GreenhouseJob, description: string): string | 
   return null;
 }
 
-export async function fetchGreenhouseBoard(boardToken: string): Promise<NormalizedGreenhouseJob[]> {
+export async function fetchGreenhouseBoard(boardToken: string, options: { parseRequirements?: boolean } = {}): Promise<NormalizedGreenhouseJob[]> {
   if (!/^[a-zA-Z0-9_-]+$/.test(boardToken)) {
     throw new Error(`Invalid Greenhouse board token: ${boardToken}`);
   }
@@ -93,7 +93,7 @@ export async function fetchGreenhouseBoard(boardToken: string): Promise<Normaliz
       source_updated_at: job.updated_at || null,
       application_deadline: job.application_deadline || null,
       raw_payload: job,
-      parsed_requirements: parseJobRequirements(description),
+      parsed_requirements: options.parseRequirements === false ? [] : parseJobRequirements(description),
       parser_version: REQUIREMENTS_PARSER_VERSION,
       content_hash: contentHash,
     };

@@ -4,7 +4,7 @@ import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
-import { initializeOnboarding } from "@/lib/onboarding-state";
+import { getOnboardingState, initializeOnboarding, onboardingDestination } from "@/lib/onboarding-state";
 import { getGoogleOAuthURL, generateState, storeOAuthState } from "@/lib/google-oauth";
 import { getLinkedInOAuthURL, generateLinkedInState, storeLinkedInOAuthState } from "@/lib/linkedin-oauth";
 
@@ -52,8 +52,9 @@ export default function LoginPage() {
         // Check onboarding status
         const profile = await ProfileService.getCurrentProfile();
         if (profile && !profile.onboarding_completed) {
-          initializeOnboarding();
-          router.push("/profile");
+          const state = await getOnboardingState();
+          const active = state || initializeOnboarding();
+          router.push(onboardingDestination(active.phase));
         } else {
           router.push("/dashboard");
         }

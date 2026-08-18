@@ -19,11 +19,11 @@ export function Header({ showAboutUs = false, showDashboard = false, showProfile
 
     return (
         <div className="border-b border-gray-200/50 bg-white/60 backdrop-blur-lg">
-            <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <div className="max-w-7xl mx-auto px-4 sm:px-8 py-4 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
                     <a href="/dashboard" className="flex items-center gap-3">
                         <img src="/applihero_none.png" alt="Applihero Logo" className="h-10 w-10" />
-                        <span className="text-xl font-bold text-gray-900">Applihero</span>
+                        <span className="hidden text-xl font-bold text-gray-900 sm:inline">Applihero</span>
                     </a>
                     {showAboutUs && (
                         <a
@@ -38,41 +38,43 @@ export function Header({ showAboutUs = false, showDashboard = false, showProfile
                     )}
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                     {showDashboard && (
                         <a
                             href="/dashboard"
-                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white/80 backdrop-blur-sm px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all"
+                            aria-label="Dashboard"
+                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white/80 backdrop-blur-sm px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all"
                         >
                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                             </svg>
-                            Dashboard
+                            <span className="hidden sm:inline">Dashboard</span>
                         </a>
                     )}
                     {showProfile && (
                         <a
                             href="/profile"
-                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white/80 backdrop-blur-sm px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all"
+                            aria-label="Profile"
+                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white/80 backdrop-blur-sm px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all"
                         >
                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                             </svg>
-                            Profile
+                            <span className="hidden sm:inline">Profile</span>
                         </a>
                     )}
                     <button
                         onClick={handleSignOut}
-                        className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-all"
+                        aria-label="Sign Out"
+                        className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-3 sm:px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-all"
                     >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                         </svg>
-                        Sign Out
+                        <span className="hidden sm:inline">Sign Out</span>
                     </button>
                 </div>
             </div>
         </div>
     );
 }
-

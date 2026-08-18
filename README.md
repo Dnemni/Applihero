@@ -5,21 +5,30 @@ Check it out here: https://www.applihero.com/
 
 ## Job discovery setup
 
-The discovery catalog is provider-neutral, with Greenhouse as the first adapter.
+Discover uses a shared source catalog: a company board is fetched once, hard
+eligibility filters run before description parsing, and only a small ranked
+shortlist is stored for each user who follows that company.
 
-1. Apply `lib/supabase/migrations/20260717_add_job_discovery.sql` to Supabase.
-2. Configure one or more Greenhouse boards with `GREENHOUSE_BOARDS_JSON`:
+1. Apply `lib/supabase/migrations/20260717_add_job_discovery.sql`.
+2. Apply `lib/supabase/migrations/20260812_add_company_monitoring.sql`.
+3. Apply `lib/supabase/migrations/20260813_repair_company_sources_and_add_ibm.sql`.
+4. Apply `lib/supabase/migrations/20260814_add_personalized_job_recommendations.sql`.
+5. Apply `lib/supabase/migrations/20260818_add_discovery_answers_and_digest_preferences.sql`.
+6. Apply `lib/supabase/migrations/20260818_seed_verified_company_catalog.sql`.
+7. Set a random `CRON_SECRET` with at least 16 characters.
+8. Optionally set `RESEND_API_KEY` and `DISCOVERY_EMAIL_FROM` for email alerts.
 
-```json
-[
-  {
-    "companyName": "Example Company",
-    "boardToken": "example",
-    "includeTitleTerms": ["intern", "new grad", "entry level"]
-  }
-]
-```
+The source connectors support Greenhouse, Lever, Ashby, IBM Careers, Oracle Recruiting Cloud, and public career pages
+that expose schema.org `JobPosting` JSON-LD. Each connector must return
+normalized jobs or throw a visible source error; failed requests never masquerade
+as an empty board. Jobs are deduplicated by source and provider job ID.
 
-The board token is the segment used by the company's public Greenhouse job board. `includeTitleTerms` is optional; when present, only postings whose titles contain one of those terms are imported. An authenticated user can then select **Refresh sources** on `/discover`. The sync records employer-provided publish time, AppliHero discovery time, and last verification time separately.
+`vercel.json` invokes `GET /api/cron/discover` every 15 minutes. The endpoint
+requires `Authorization: Bearer $CRON_SECRET`, scans only followed due sources,
+uses exponential backoff for failures, and sends due email digests. Users can
+choose a 15-minute, hourly, 6-hour, daily, or weekly digest. Unfollowed catalog
+entries are metadata only and do not create network or storage work. In-app
+alerts work without an email provider.
 
-Additional providers should normalize their payloads into `discovery_jobs`; user application state remains in `jobs` and links back through `jobs.discovery_job_id`.
+User application state remains in `jobs` and links back to the shared catalog
+through `jobs.discovery_job_id`.

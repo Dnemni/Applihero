@@ -9,6 +9,7 @@ export type ChatPanelProps = {
   onToggleFullscreen?: () => void;
   jobId?: string;
   userId?: string;
+  applicationBrief?: string;
 };
 
 type Message = { role: "user" | "assistant"; content: string };
@@ -21,7 +22,7 @@ const initialMessages: Message[] = [
   }
 ];
 
-export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId, userId }: ChatPanelProps) {
+export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId, userId, applicationBrief }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,11 +46,12 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId, userI
       try {
         const history = await ChatService.getChatHistory(jobId);
         if (history.length > 0) {
-          setMessages(history.map((msg: any) => ({
+          const saved = history.map((msg: any) => ({
             role: msg.role as "user" | "assistant",
             content: msg.content
-          })));
-        }
+          }));
+          setMessages(applicationBrief ? [{ role: "assistant", content: applicationBrief }, ...saved] : saved);
+        } else if (applicationBrief) setMessages([{ role: "assistant", content: applicationBrief }]);
       } catch (error) {
         console.error("Failed to load chat history:", error);
       } finally {
@@ -58,7 +60,7 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId, userI
     }
 
     loadMessages();
-  }, [jobId]);
+  }, [jobId, applicationBrief]);
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -75,7 +77,7 @@ export function ChatPanel({ fullscreen = false, onToggleFullscreen, jobId, userI
 
     try {
       // Call RAG-enabled API endpoint
-      const reply = await ChatService.sendMessage(jobId, userId, userMessage);
+      const reply = await ChatService.sendMessage(jobId, userMessage);
       
       // Add empty assistant message to start streaming
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);

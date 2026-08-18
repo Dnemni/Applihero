@@ -4,9 +4,9 @@
  * Now uses Supabase database instead of localStorage for persistence
  */
 
-import { supabase } from "./supabase/client";
+import { discoveryFetch } from "./discovery/client";
 
-export type OnboardingPhase = "profile" | "dashboard" | "job-creation" | "job-detail" | "resume-optimizer" | "completed";
+export type OnboardingPhase = "profile" | "dashboard" | "discover" | "discover-detail" | "job-creation" | "job-detail" | "resume-optimizer" | "completed";
 
 export type OnboardingState = {
   phase: OnboardingPhase;
@@ -15,37 +15,15 @@ export type OnboardingState = {
   jobId?: string; // Track the tutorial job ID
 };
 
-// In-memory cache to avoid excessive database calls
-let cachedState: OnboardingState | null = null;
-
 export async function getOnboardingState(): Promise<OnboardingState | null> {
   if (typeof window === "undefined") return null;
   
-  // Return cached state if available
-  if (cachedState !== null) return cachedState;
-  
   try {
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    const response = await discoveryFetch("/api/onboarding");
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const state = payload.state as OnboardingState;
     
-    // Fetch profile with onboarding fields
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select("onboarding_phase, onboarding_step, onboarding_completed_phases, onboarding_job_id")
-      .eq("id", user.id)
-      .single();
-    
-    if (error || !profile) return null;
-    
-    const state: OnboardingState = {
-      phase: profile.onboarding_phase as OnboardingPhase,
-      step: profile.onboarding_step || 0,
-      completedPhases: profile.onboarding_completed_phases || [],
-      jobId: profile.onboarding_job_id || undefined,
-    };
-    
-    cachedState = state;
     return state;
   } catch (error) {
     console.error("Error fetching onboarding state:", error);
@@ -57,27 +35,8 @@ export async function setOnboardingState(state: OnboardingState): Promise<void> 
   if (typeof window === "undefined") return;
   
   try {
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    
-    // Update profile with onboarding state
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        onboarding_phase: state.phase,
-        onboarding_step: state.step,
-        onboarding_completed_phases: state.completedPhases,
-        onboarding_job_id: state.jobId || null,
-      })
-      .eq("id", user.id);
-    
-    if (error) {
-      console.error("Error saving onboarding state:", error);
-    } else {
-      // Update cache
-      cachedState = state;
-    }
+    const response = await discoveryFetch("/api/onboarding", { method: "PATCH", body: JSON.stringify(state) });
+    if (!response.ok) throw new Error((await response.json()).error || "Unable to save onboarding state");
   } catch (error) {
     console.error("Error setting onboarding state:", error);
   }
@@ -87,29 +46,27 @@ export async function clearOnboardingState(): Promise<void> {
   if (typeof window === "undefined") return;
   
   try {
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    await discoveryFetch("/api/onboarding", { method: "PATCH", body: JSON.stringify({
+      phase: "completed",
+      step: 0,
+      completedPhases: ["profile", "dashboard", "discover", "discover-detail", "job-creation", "job-detail", "resume-optimizer", "completed"],
+    }) });
     
-    // Reset onboarding fields
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        onboarding_phase: "completed",
-        onboarding_step: 0,
-        onboarding_completed_phases: ["profile", "dashboard", "job-creation", "job-detail", "resume-optimizer", "completed"],
-        onboarding_job_id: null,
-      })
-      .eq("id", user.id);
-    
-    if (error) {
-      console.error("Error clearing onboarding state:", error);
-    }
-    
-    // Clear cache
-    cachedState = null;
   } catch (error) {
     console.error("Error clearing onboarding state:", error);
+  }
+}
+
+export function onboardingDestination(phase: OnboardingPhase) {
+  switch (phase) {
+    case "profile": return "/profile";
+    case "dashboard": return "/dashboard";
+    case "discover": return "/discover";
+    case "discover-detail": return "/discover";
+    case "job-creation": return "/dashboard/new";
+    case "job-detail": return "/dashboard";
+    case "resume-optimizer": return "/resume-optimizer";
+    default: return "/dashboard";
   }
 }
 

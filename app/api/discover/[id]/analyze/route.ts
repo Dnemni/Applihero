@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
-import { analyzeJobFit, MATCHER_VERSION } from "@/lib/discovery/matcher";
+import { analyzeJobFit, MATCHER_VERSION, quickFitFromAnalysis } from "@/lib/discovery/matcher";
 import { hashText } from "@/lib/discovery/parser";
-import { getCachedMatch, getDiscoveryJob, getUserBackground, saveMatch } from "@/lib/discovery/repository";
+import { getCachedMatch, getDiscoveryJob, getUserBackground, saveMatch, saveRecommendationFit } from "@/lib/discovery/repository";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const user = await requireApiUser(request);
     const [job, background] = await Promise.all([
       getDiscoveryJob(params.id),
-      getUserBackground(user.id),
+      getUserBackground(user.id, params.id),
     ]);
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
@@ -23,7 +23,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       jobHash: job.content_hash,
       matcherVersion: MATCHER_VERSION,
     });
-    if (cached) return NextResponse.json({ analysis: cached, cached: true });
+    if (cached) {
+      const quickFit = quickFitFromAnalysis(cached, profileHash, job.content_hash);
+      await saveRecommendationFit(user.id, job.id, quickFit);
+      return NextResponse.json({ analysis: cached, quickFit, cached: true });
+    }
 
     const analysis = await analyzeJobFit(job, background);
     await saveMatch({
@@ -34,7 +38,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       matcherVersion: MATCHER_VERSION,
       result: analysis,
     });
-    return NextResponse.json({ analysis, cached: false });
+    const quickFit = quickFitFromAnalysis(analysis, profileHash, job.content_hash);
+    await saveRecommendationFit(user.id, job.id, quickFit);
+    return NextResponse.json({ analysis, quickFit, cached: false });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;
     console.error("Discover analysis error:", error);

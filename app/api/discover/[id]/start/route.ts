@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
 import { getDiscoveryJob } from "@/lib/discovery/repository";
 import { supabaseAdmin } from "@/lib/supabase/client";
+import { fetchApplicationForm, saveApplicationFormSnapshot } from "@/lib/applications/form-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }).select("id").single();
     if (error) throw error;
 
-    return NextResponse.json({ jobId: created.id, existing: false });
+    let formImport = { imported: 0, available: false };
+    try {
+      const input = await fetchApplicationForm(job);
+      const result = await saveApplicationFormSnapshot({ jobId: created.id, userId: user.id, input });
+      formImport = { imported: result.fields.length, available: result.available };
+    } catch (formError) {
+      console.warn("Application form import was not available:", formError);
+    }
+
+    return NextResponse.json({ jobId: created.id, existing: false, formImport });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;
     console.error("Start application error:", error);

@@ -1,5 +1,6 @@
 import { supabase } from '../client';
 import type { ChatMessage, Database, ChatRole } from '../types';
+import { discoveryFetch } from '@/lib/discovery/client';
 
 type ChatMessageInsert = Database['public']['Tables']['chat_messages']['Insert'];
 
@@ -151,15 +152,14 @@ export class ChatService {
    */
   static async sendMessage(
     jobId: string,
-    userId: string,
     message: string
   ): Promise<string> {
-    const response = await fetch(`/api/jobsessions/${jobId}/chat`, {
+    const response = await discoveryFetch(`/api/jobsessions/${jobId}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ message, userId }),
+      body: JSON.stringify({ message }),
     });
 
     if (!response.ok) {

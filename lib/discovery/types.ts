@@ -1,4 +1,4 @@
-export type JobProvider = "greenhouse" | "lever" | "ashby" | "career_site";
+export type JobProvider = "greenhouse" | "lever" | "ashby" | "ibm" | "oracle" | "amazon" | "career_site";
 export type DiscoveryJobStatus = "open" | "unverified" | "closed";
 export type RequirementPriority = "minimum" | "preferred";
 export type RequirementCategory =
@@ -71,6 +71,10 @@ export interface EligibilityAssessment {
 }
 
 export interface QuickFit {
+  matcherVersion?: string;
+  evaluatedProfileHash?: string;
+  evaluatedJobHash?: string;
+  source?: "deterministic" | "analysis";
   score: number | null;
   band: FitBand;
   label: string;
@@ -94,6 +98,15 @@ export interface JobFitAnalysis {
   band: FitBand;
   label: string;
   summary: string;
+  roleSummary: string;
+  applicantSummary: string;
+  fitSummary: string;
+  recommendation: {
+    priority: "high" | "medium" | "low";
+    verdict: "apply" | "consider" | "skip";
+    label: string;
+    rationale: string;
+  };
   requirements: RequirementFit[];
   strengths: Array<{ title: string; evidence: string }>;
   gaps: Array<{
@@ -114,4 +127,50 @@ export interface JobFitAnalysis {
 export interface DiscoveryJobCard extends Omit<DiscoveryJob, "description_html" | "parsed_requirements"> {
   description_preview: string;
   quickFit: QuickFit;
+  application: DiscoveryApplicationState | null;
+}
+
+export interface DiscoveryApplicationState {
+  id: string;
+  status: "Draft" | "In Progress" | "Submitted" | "Archived";
+  lastTouchedAt: string;
+}
+
+export interface DiscoverySource {
+  id: string;
+  provider: JobProvider;
+  external_key: string;
+  company_name: string;
+  career_url: string | null;
+  enabled: boolean;
+  featured?: boolean;
+  last_sync_completed_at: string | null;
+  last_sync_error: string | null;
+  sync_interval_minutes: number;
+  subscribed: boolean;
+}
+
+export interface DiscoverySourceSuggestion {
+  companyName: string;
+  provider: JobProvider;
+  externalKey: string;
+  careerUrl: string;
+  existingSourceId?: string;
+}
+
+export interface DiscoverySourceRecommendation {
+  sourceId: string;
+  companyName: string;
+  reason: string;
+  bestScore: number | null;
+}
+
+export interface DiscoveryNotification {
+  id: string;
+  kind: "job_matches" | "source_error";
+  title: string;
+  body: string;
+  job_ids: string[];
+  read_at: string | null;
+  created_at: string;
 }

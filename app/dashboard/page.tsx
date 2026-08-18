@@ -56,9 +56,9 @@ export default function DashboardPage() {
       position: "center" as const,
     },
     {
-      title: "Create Your First Application",
-      description: "Ready to get started? Click the highlighted 'New application' button to add your first job! You'll paste the job description and Applihero will help you craft personalized answers.",
-      targetId: "new-application-button",
+      title: "Find Roles Worth Your Time",
+      description: "Discovery monitors companies you choose, scans their official career pages, and ranks new roles against your background. Open it now to choose your first companies.",
+      targetId: "discover-jobs-button",
       position: "bottom" as const,
     },
   ];
@@ -139,24 +139,22 @@ export default function DashboardPage() {
 
   async function handleOnboardingSkip() {
     setShowOnboarding(false);
-    // Advance to job-creation phase
-    await advanceOnboarding('dashboard', 'job-creation');
+    await advanceOnboarding('dashboard', 'discover');
+    router.push('/discover');
   }
 
   async function handleOnboardingComplete() {
     setShowOnboarding(false);
-    // Advance to job-creation phase
-    await advanceOnboarding('dashboard', 'job-creation');
+    await advanceOnboarding('dashboard', 'discover');
   }
 
-  function handleNewApplicationClick(e: React.MouseEvent) {
+  function handleDiscoverClick(e: React.MouseEvent) {
     // If we're on the last onboarding step (step 2), complete the onboarding
     if (showOnboarding && onboardingStep === 2) {
       e.preventDefault();
       handleOnboardingComplete();
-      // Navigate after a short delay
       setTimeout(() => {
-        router.push('/dashboard/new');
+        router.push('/discover');
       }, 300);
     }
     // Otherwise, let the link navigate normally
@@ -247,7 +245,9 @@ export default function DashboardPage() {
           </div>
           <div className="ml-4 flex-shrink-0 flex gap-3">
             <a
+              id="discover-jobs-button"
               href="/discover"
+              onClick={handleDiscoverClick}
               className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition-all"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -267,7 +267,6 @@ export default function DashboardPage() {
             <a
               id="new-application-button"
               href="/dashboard/new"
-              onClick={handleNewApplicationClick}
               className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-indigo-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all active:scale-[0.98]"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

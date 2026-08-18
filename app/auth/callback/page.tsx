@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { ProfileService } from "@/lib/supabase/services";
-import { initializeOnboarding } from "@/lib/onboarding-state";
+import { getOnboardingState, initializeOnboarding, onboardingDestination } from "@/lib/onboarding-state";
 
 export default function AuthCallbackPage() {
     const router = useRouter();
@@ -57,8 +57,9 @@ export default function AuthCallbackPage() {
                                 
                                 // If no profile exists or onboarding not completed, go to profile
                                 if (!profile || !profile.onboarding_completed) {
-                                    initializeOnboarding();
-                                    router.push("/profile");
+                                    const state = await getOnboardingState();
+                                    const active = state || initializeOnboarding();
+                                    router.push(onboardingDestination(active.phase));
                                     return;
                                 }
                                 
@@ -122,8 +123,9 @@ export default function AuthCallbackPage() {
                         }
                         
                         if (!profile || !profile.onboarding_completed) {
-                            initializeOnboarding();
-                            router.push("/profile");
+                            const state = await getOnboardingState();
+                            const active = state || initializeOnboarding();
+                            router.push(onboardingDestination(active.phase));
                         } else {
                             router.push("/dashboard");
                         }
@@ -163,4 +165,3 @@ export default function AuthCallbackPage() {
         </div>
     );
 }
-

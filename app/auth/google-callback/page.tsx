@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { getStoredOAuthState, clearOAuthState } from '@/lib/google-oauth';
 import { ProfileService } from '@/lib/supabase/services';
-import { initializeOnboarding } from '@/lib/onboarding-state';
+import { getOnboardingState, initializeOnboarding, onboardingDestination } from '@/lib/onboarding-state';
 import { userMetadataIndicatesPassword } from '@/lib/auth/password-status';
 
 export default function GoogleCallbackPage() {
@@ -132,8 +132,9 @@ export default function GoogleCallbackPage() {
         // For existing or non-OAuth users, proceed normally
         const profile = await ProfileService.getCurrentProfile();
         if (profile && !profile.onboarding_completed) {
-          initializeOnboarding();
-          router.push('/profile');
+          const state = await getOnboardingState();
+          const active = state || initializeOnboarding();
+          router.push(onboardingDestination(active.phase));
         } else {
           router.push('/dashboard');
         }

@@ -67,7 +67,7 @@ export function ProfileInfoCard({
           />
           <p className="mt-1 text-xs text-gray-500">Email cannot be changed</p>
         </div>
-        <div>
+        <div id="bio-section">
           <textarea
             rows={3}
             value={bio}
@@ -87,6 +87,7 @@ export function ProfileInfoCard({
           Cancel
         </button>
         <button
+          id="save-profile-button"
           onClick={onSave}
           disabled={saving}
           className="rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white hover:from-indigo-700 hover:to-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"

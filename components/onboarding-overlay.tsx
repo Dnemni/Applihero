@@ -69,8 +69,11 @@ export function OnboardingOverlay({
 
   const calculateTooltipPosition = (rect: DOMRect, position: string) => {
     const padding = 20;
-    const tooltipWidth = 400;
-    const tooltipHeight = 200;
+    const tooltipWidth = Math.min(400, window.innerWidth - 32);
+    // Tutorial cards with progress, descriptions, and actions routinely exceed
+    // 200px. Reserve their real working height so controls never fall below
+    // the viewport on laptop-sized or resized windows.
+    const tooltipHeight = Math.min(340, window.innerHeight - 32);
     const spotlightPadding = 8; // The padding around highlighted element
 
     let top = 0;
@@ -356,7 +359,7 @@ export function OnboardingOverlay({
       {/* Tooltip card */}
       <div
         ref={tooltipRef}
-        className="absolute bg-white rounded-2xl shadow-2xl p-6 w-[400px] pointer-events-auto transform transition-all duration-300"
+        className="absolute max-h-[calc(100vh-2rem)] w-[min(400px,calc(100vw-2rem))] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl pointer-events-auto transform transition-all duration-300"
         style={{
           top: tooltipPosition.top,
           left: tooltipPosition.left,

@@ -9,6 +9,7 @@ import { getPasswordSetMetadata } from "@/lib/auth/password-status";
 import { OnboardingOverlay, OnboardingStep } from "@/components/onboarding-overlay";
 import { Header } from "@/components/header";
 import { toast } from "@/components/toast";
+import { discoveryFetch } from "@/lib/discovery/client";
 import { PasswordStrengthBar, getPasswordStrength } from "@/components/PasswordStrengthBar";
 import { ProfileInfoCard } from "@/components/profile/ProfileInfoCard";
 import { DocumentsCard } from "@/components/profile/DocumentsCard";
@@ -41,6 +42,16 @@ export default function ProfilePage() {
   const [transcriptText, setTranscriptText] = useState("");
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [marketingEmails, setMarketingEmails] = useState(false);
+  const [discoveryPreferences, setDiscoveryPreferences] = useState({
+    email_enabled: false,
+    digest_frequency_minutes: 1440,
+    minimum_fit_score: 45,
+    preferred_country: "",
+    preferred_regions: [] as string[],
+    location_scope: "country" as "regions" | "country" | "worldwide",
+    include_remote: true,
+  });
+  const [preferredRegionsInput, setPreferredRegionsInput] = useState("");
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedTranscript, setUploadedTranscript] = useState<File | null>(null);
@@ -103,6 +114,15 @@ export default function ProfilePage() {
 
   useEffect(() => {
     loadLinkedInProfile();
+  }, []);
+
+  useEffect(() => {
+    discoveryFetch("/api/discover/preferences").then(async response => {
+      if (!response.ok) return;
+      const payload = await response.json();
+      setDiscoveryPreferences(payload.preferences);
+      setPreferredRegionsInput((payload.preferences.preferred_regions || []).join(", "));
+    }).catch(() => undefined);
   }, []);
 
   async function loadProfile() {
@@ -180,22 +200,33 @@ export default function ProfilePage() {
   async function handleSaveProfile() {
     setSaving(true);
 
-    const updated = await ProfileService.updateProfile({
-      first_name: firstName,
-      last_name: lastName,
-      bio: bio,
-    });
+    const preferredRegions = preferredRegionsInput.split(",").map(item => item.trim()).filter(Boolean);
+    const [updated, locationResponse] = await Promise.all([
+      ProfileService.updateProfile({ first_name: firstName, last_name: lastName, bio }),
+      discoveryFetch("/api/discover/preferences", { method: "PATCH", body: JSON.stringify({
+        emailEnabled: discoveryPreferences.email_enabled,
+        digestFrequencyMinutes: discoveryPreferences.digest_frequency_minutes,
+        minimumFitScore: discoveryPreferences.minimum_fit_score,
+        preferredCountry: discoveryPreferences.preferred_country,
+        preferredRegions,
+        locationScope: discoveryPreferences.location_scope,
+        includeRemote: discoveryPreferences.include_remote,
+      }) }),
+    ]);
 
-    if (updated) {
+    const locationPayload = await locationResponse.json().catch(() => ({}));
+    if (updated && locationResponse.ok) {
       setProfile(updated);
+      setDiscoveryPreferences(locationPayload.preferences);
+      setPreferredRegionsInput((locationPayload.preferences.preferred_regions || []).join(", "));
       toast.success("Profile updated successfully!");
 
       // Auto-complete profile onboarding if on the last step
-      if (showOnboarding && onboardingStep === 4) {
+      if (showOnboarding && onboardingStep === 5) {
         setTimeout(() => handleOnboardingComplete(), 800);
       }
     } else {
-      toast.error("Failed to update profile");
+      toast.error("Failed to update profile", locationPayload.error || "Please try again.");
     }
 
     setSaving(false);
@@ -224,6 +255,12 @@ export default function ProfilePage() {
       title: "Add Your Bio ✍️",
       description: "Click in the bio field and write a brief description about yourself. Include your interests, goals, and what makes you unique. Don't worry, you can edit this anytime!",
       targetId: "bio-section",
+      position: "right",
+    },
+    {
+      title: "Set Your Search Location 📍",
+      description: "Choose the country and optional regions where you can work. Discovery uses this explicit preference before résumé hints, and you can include or exclude remote roles.",
+      targetId: "discovery-location-section",
       position: "right",
     },
     {
@@ -595,6 +632,16 @@ export default function ProfilePage() {
               onCancel={loadProfile}
               saving={saving}
             />
+
+            <section id="discovery-location-section" className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-gray-900">Discovery location</h2><p className="mt-1 text-sm text-gray-600">Used to filter monitored jobs before they enter your personalized feed.</p></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Matching preference</span></div>
+              <label className="mt-5 block text-sm font-medium text-gray-700">Search scope<select value={discoveryPreferences.location_scope} onChange={event => setDiscoveryPreferences(current => ({ ...current, location_scope: event.target.value as "regions" | "country" | "worldwide" }))} className="mt-2 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-indigo-500"><option value="regions">Preferred regions only</option><option value="country">Anywhere in my country</option><option value="worldwide">Worldwide</option></select><span className="mt-1.5 block text-xs font-normal text-gray-500">Country-wide is the default. Your résumé location never silently restricts the feed to one region.</span></label>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-gray-700">Preferred country<select value={discoveryPreferences.preferred_country || ""} onChange={event => setDiscoveryPreferences(current => ({ ...current, preferred_country: event.target.value }))} className="mt-2 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-indigo-500"><option value="">Use résumé location</option><option value="US">United States</option><option value="CA">Canada</option><option value="GB">United Kingdom</option><option value="AU">Australia</option><option value="IN">India</option><option value="IE">Ireland</option><option value="DE">Germany</option><option value="FR">France</option><option value="SG">Singapore</option><option value="JP">Japan</option><option value="BR">Brazil</option><option value="CN">China</option></select></label>
+                <label className="text-sm font-medium text-gray-700">Preferred regions <span className="font-normal text-gray-400">for regional scope</span><input value={preferredRegionsInput} onChange={event => setPreferredRegionsInput(event.target.value)} placeholder="California, New York, Remote" className="mt-2 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-indigo-500" /><span className="mt-1.5 block text-xs font-normal text-gray-500">Separate states, provinces, or metro areas with commas.</span></label>
+              </div>
+              <label className="mt-4 flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3"><span><span className="block text-sm font-medium text-gray-800">Include remote roles</span><span className="mt-0.5 block text-xs text-gray-500">Remote roles are included only when this is enabled.</span></span><input type="checkbox" checked={discoveryPreferences.include_remote !== false} onChange={event => setDiscoveryPreferences(current => ({ ...current, include_remote: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-indigo-600" /></label>
+            </section>
 
             {/* Documents (restored original rich upload UI) */}
             <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">

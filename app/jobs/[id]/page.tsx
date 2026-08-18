@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { JobService, ProfileService } from "@/lib/supabase/services";
@@ -9,14 +9,23 @@ import { AnswerEditorPanel } from "../../../components/answer-editor";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { CoverLetterModal } from "@/components/cover-letter-modal";
 import { toast } from "@/components/toast";
+import { discoveryFetch } from "@/lib/discovery/client";
 import { useConfirmation } from "@/components/confirmation-dialog";
 import type { OnboardingStep } from "@/components/onboarding-overlay";
-import { 
+import {
   getOnboardingState, 
   setOnboardingState,
   shouldShowOnboarding,
   clearOnboardingState
 } from "@/lib/onboarding-state";
+
+type WorkspaceContext = {
+  officialUrl: string | null;
+  discoveryUrl: string | null;
+  quickFit: { score: number | null; label: string } | null;
+  form: { observed_at: string; provider: string; application_form_fields: Array<{ id: string; label: string; required: boolean; field_type: string; suggested_answer: string | null; answer_source: string }> } | null;
+  plan: { headline: string; priority: "high" | "medium" | "low"; summary: string; nextSteps: string[]; resumeGuidance: string[] };
+};
 
 export default function JobPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -48,6 +57,9 @@ export default function JobPage({ params }: { params: { id: string } }) {
   const [deleting, setDeleting] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
+  const [refreshingForm, setRefreshingForm] = useState(false);
+  const attemptedAutomaticFormImport = useRef(false);
 
   const onboardingSteps: OnboardingStep[] = [
     {
@@ -130,8 +142,43 @@ export default function JobPage({ params }: { params: { id: string } }) {
     setUserId(user.id);
 
     // Load job data
-    await loadJob();
+    await Promise.all([loadJob(), loadWorkspace()]);
   }
+
+  async function loadWorkspace() {
+    try {
+      const response = await discoveryFetch(`/api/jobs/${params.id}/workspace`);
+      const payload = await response.json();
+      if (response.ok) setWorkspace(payload);
+    } catch (error) {
+      console.warn("Application plan is unavailable:", error);
+    }
+  }
+
+  async function refreshApplicationForm(announce = true) {
+    setRefreshingForm(true);
+    try {
+      const response = await discoveryFetch(`/api/jobs/${params.id}/application-form`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to inspect the application form");
+      await Promise.all([loadJob(), loadWorkspace()]);
+      if (announce) toast.success(payload.fields?.length ? "Application form refreshed" : "Official posting checked", payload.fields?.length ? `${payload.fields.length} fields were found.` : "This provider does not expose its live form publicly; use the official posting to verify it.");
+    } catch (error) {
+      if (announce) toast.error("Form check unavailable", error instanceof Error ? error.message : "Open the official posting to review the live form.");
+    } finally { setRefreshingForm(false); }
+  }
+
+  function coachingBrief() {
+    if (!workspace) return undefined;
+    return `### Your application plan\n\n**${workspace.plan.headline}** · ${workspace.plan.priority} priority${workspace.quickFit?.score != null ? ` · ${workspace.quickFit.score}/100` : ""}\n\n${workspace.plan.summary}\n\n**Do next**\n${workspace.plan.nextSteps.map(item => `- ${item}`).join("\n")}\n\n**Resume focus**\n${workspace.plan.resumeGuidance.map(item => `- ${item}`).join("\n")}\n\nAsk me to work through any of these steps with you.`;
+  }
+
+  useEffect(() => {
+    if (!workspace?.officialUrl || workspace.form || attemptedAutomaticFormImport.current) return;
+    attemptedAutomaticFormImport.current = true;
+    void refreshApplicationForm(false);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [workspace?.officialUrl, workspace?.form]);
 
   async function loadJob() {
     // Only show loading spinner on initial load, not on refreshes
@@ -513,6 +560,28 @@ export default function JobPage({ params }: { params: { id: string } }) {
           </div>
         </div>
 
+        {workspace && <section className="mb-6 overflow-hidden rounded-2xl border border-amber-200/80 bg-white/80 shadow-sm backdrop-blur">
+          <div className="grid lg:grid-cols-[minmax(0,1.45fr)_minmax(300px,.75fr)]">
+            <div className="p-5 sm:p-6">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${workspace.plan.priority === "high" ? "bg-emerald-100 text-emerald-800" : workspace.plan.priority === "medium" ? "bg-amber-100 text-amber-900" : "bg-gray-100 text-gray-700"}`}>{workspace.plan.priority} priority</span>
+                {workspace.quickFit?.score != null && <span className="text-sm font-semibold text-gray-500">{workspace.quickFit.score}/100 match</span>}
+              </div>
+              <h2 className="mt-3 text-lg font-bold text-gray-950">{workspace.plan.headline}</h2>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-gray-600">{workspace.plan.summary}</p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Do next</p><ol className="mt-2 space-y-2">{workspace.plan.nextSteps.map((step, index) => <li key={step} className="flex gap-2 text-sm leading-5 text-gray-700"><span className="font-bold text-indigo-600">{index + 1}.</span>{step}</li>)}</ol></div>
+                <div><p className="text-xs font-bold uppercase tracking-wide text-gray-400">Resume focus</p><ul className="mt-2 space-y-2">{workspace.plan.resumeGuidance.map(item => <li key={item} className="flex gap-2 text-sm leading-5 text-gray-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />{item}</li>)}</ul></div>
+              </div>
+            </div>
+            <div className="border-t border-amber-100 bg-amber-50/55 p-5 lg:border-l lg:border-t-0 sm:p-6">
+              <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-gray-950">Application form</p><p className="mt-1 text-xs leading-5 text-gray-500">Fields observed on the employer’s official application.</p></div><button onClick={() => void refreshApplicationForm()} disabled={refreshingForm} className="rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-amber-300 disabled:opacity-50">{refreshingForm ? "Checking…" : "Refresh"}</button></div>
+              {workspace.form?.application_form_fields?.length ? <div className="mt-4"><div className="flex gap-5 text-sm"><span><strong>{workspace.form.application_form_fields.length}</strong> fields</span><span><strong>{workspace.form.application_form_fields.filter(field => field.required).length}</strong> required</span><span><strong>{workspace.form.application_form_fields.filter(field => field.suggested_answer).length}</strong> ready</span></div><div className="mt-3 space-y-1.5">{workspace.form.application_form_fields.slice(0, 4).map(field => <div key={field.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/80 px-3 py-2 text-xs"><span className="min-w-0 truncate font-medium text-gray-700">{field.label}</span><span className={`shrink-0 font-semibold ${field.suggested_answer ? "text-emerald-700" : field.required ? "text-amber-800" : "text-gray-400"}`}>{field.suggested_answer ? "Ready" : field.required ? "Needs you" : "Optional"}</span></div>)}</div><p className="mt-3 text-xs leading-5 text-gray-500">Direct facts from your profile are suggested. Sensitive eligibility and demographic answers are never inferred.</p></div> : <p className="mt-4 text-sm leading-6 text-gray-600">The posting was checked, but this provider does not publish its full live form. Open it to verify any remaining fields.</p>}
+              <div className="mt-4 flex flex-wrap gap-3">{workspace.officialUrl && <a href={workspace.officialUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-gray-950 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700">Go to job posting <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 3h7v7m0-7L10 14M5 7v12h12v-5" /></svg></a>}{workspace.discoveryUrl && <a href={workspace.discoveryUrl} className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700">View fit evidence</a>}</div>
+            </div>
+          </div>
+        </section>}
+
         {/* Main Content Grid */}
         <div className="flex gap-6 xl:gap-8">
           {/* Chat Panel or Minimized Bar */}
@@ -544,6 +613,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
                 userId={userId}
                 fullscreen={fullscreen === 'chat'}
                 onToggleFullscreen={() => setFullscreen(fullscreen === 'chat' ? null : 'chat')}
+                applicationBrief={coachingBrief()}
               />
             </div>
           )}

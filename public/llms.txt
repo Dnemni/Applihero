@@ -1,0 +1,26 @@
+# Applihero
+
+> Applihero is an AI-powered job application coaching platform that helps users tailor resumes, prepare application materials, receive feedback on application answers, and practice for interviews using context from their own background and target roles.
+
+Canonical site: https://www.applihero.com/
+
+## Public pages
+
+- Home: https://www.applihero.com/
+- Privacy Policy: https://www.applihero.com/privacy-policy
+
+## Core product capabilities
+
+- Resume analysis and optimization against job descriptions
+- Personalized cover-letter and application-material assistance
+- Feedback on job application questions and drafted answers
+- AI chat and interview preparation grounded in user-provided career context
+- Storage and retrieval of user resumes, transcripts, job descriptions, application answers, and generated materials for authenticated users
+
+## Access and indexing
+
+Public marketing and policy pages may be crawled and summarized. Authentication, password-reset, dashboard, job-session, and other account-specific areas contain utility or private user content and are not intended for search indexing.
+
+## Contact
+
+For questions about Applihero or its data practices, contact dhruvnemani@gmail.com.

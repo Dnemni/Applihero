@@ -1,4 +1,4 @@
-user-agent: *
-allow: /
+User-agent: *
+Allow: /
 
-sitemap: https://applihero.com/sitemap.xml
+Sitemap: https://www.applihero.com/sitemap.xml

@@ -202,8 +202,9 @@ export async function syncSource(source: any): Promise<SyncResult> {
 
     const hydratedByKey = new Map<string, NormalizedSourceJob>();
     const hydrationCandidates = Array.from(candidatesToHydrate.values());
-    for (let index = 0; index < hydrationCandidates.length; index += 8) {
-      const hydrated = await Promise.all(hydrationCandidates.slice(index, index + 8).map(job => hydrateSourceJob(sourceForFetch, job)));
+    const hydrationBatchSize = sourceForFetch.provider === "workday" ? 3 : 8;
+    for (let index = 0; index < hydrationCandidates.length; index += hydrationBatchSize) {
+      const hydrated = await Promise.all(hydrationCandidates.slice(index, index + hydrationBatchSize).map(job => hydrateSourceJob(sourceForFetch, job)));
       hydrated.forEach(job => hydratedByKey.set(job.source_job_id, prepareSourceJob(job)));
     }
 

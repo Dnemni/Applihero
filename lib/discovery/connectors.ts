@@ -167,23 +167,43 @@ function workdayApiBase(config: JsonRecord = {}) {
 }
 
 async function fetchWorkdayJson(url: string, body?: JsonRecord) {
-  const response = await fetch(url, {
-    method: body ? "POST" : "GET",
-    headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), "User-Agent": "AppliHero Job Monitor/1.0" },
-    body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`Workday careers source returned ${response.status}`);
-  return response.json() as Promise<JsonRecord>;
+  // Workday boards commonly reject large page sizes and will occasionally
+  // throttle a short burst of public detail requests. Keep retries local to
+  // one request so a source can resume cleanly on its next scheduled scan.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch(url, {
+      method: body ? "POST" : "GET",
+      headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), "User-Agent": "AppliHero Job Monitor/1.0" },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (response.ok) return response.json() as Promise<JsonRecord>;
+    if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+      await new Promise(resolve => setTimeout(resolve, 750 * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`Workday careers source returned ${response.status}`);
+  }
+  throw new Error("Workday careers source could not be reached");
 }
 
 async function fetchWorkday(config: JsonRecord = {}): Promise<NormalizedSourceJob[]> {
   const requestedLimit = Number(config.maxJobs);
-  const maxJobs = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 100) : 100;
-  const payload = await fetchWorkdayJson(`${workdayApiBase(config)}/jobs`, { limit: maxJobs, offset: 0, searchText: "" });
+  const maxJobs = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 50) : 50;
+  // NVIDIA's public Workday board, and many others, return HTTP 400 for a
+  // 100-item payload. Requesting pages of 20 keeps the catalog cap at 50
+  // without relying on a provider-specific undocumented maximum.
+  const pageSize = Math.min(20, maxJobs);
+  const postings: JsonRecord[] = [];
+  for (let offset = 0; offset < maxJobs; offset += pageSize) {
+    const payload = await fetchWorkdayJson(`${workdayApiBase(config)}/jobs`, { limit: Math.min(pageSize, maxJobs - offset), offset, searchText: "" });
+    const page = Array.isArray(payload.jobPostings) ? payload.jobPostings : [];
+    postings.push(...page);
+    if (page.length < pageSize) break;
+  }
   const { host, site } = workdayConfig(config);
-  return (Array.isArray(payload.jobPostings) ? payload.jobPostings : []).slice(0, maxJobs).map((row: JsonRecord) => {
+  return postings.slice(0, maxJobs).map((row: JsonRecord) => {
     const externalPath = String(row.externalPath || "");
     const jobReqId = String(row.bulletFields?.[0] || row.jobReqId || externalPath);
     const sourceUrl = new URL(`/${encodeURIComponent(site)}${externalPath}`, `https://${host}`).toString();

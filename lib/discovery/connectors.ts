@@ -17,6 +17,14 @@ type JsonRecord = Record<string, any>;
 
 const KNOWN_COMPANIES: Array<SourceConfig & { aliases: string[] }> = [
   {
+    provider: "workday",
+    externalKey: "nvidia/NVIDIAExternalCareerSite",
+    companyName: "NVIDIA",
+    careerUrl: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
+    config: { host: "nvidia.wd5.myworkdayjobs.com", tenant: "nvidia", site: "NVIDIAExternalCareerSite" },
+    aliases: ["nvidia", "nvidia corporation"],
+  },
+  {
     provider: "amazon",
     externalKey: "amazon-jobs",
     companyName: "Amazon",
@@ -142,6 +150,63 @@ async function fetchAshby(board: string): Promise<NormalizedSourceJob[]> {
     applyUrl: row.applyUrl, publishedAt: row.publishedAt, raw: row,
     parseRequirements: false,
   }));
+}
+
+function workdayConfig(config: JsonRecord = {}) {
+  const host = String(config.host || "").toLowerCase().trim();
+  const tenant = String(config.tenant || "").trim();
+  const site = String(config.site || "").trim();
+  if (!/^[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com$/.test(host) || isIP(host)) throw new Error("Invalid Workday careers host");
+  if (!/^[A-Za-z0-9_-]+$/.test(tenant) || !/^[A-Za-z0-9_-]+$/.test(site)) throw new Error("Invalid Workday careers site");
+  return { host, tenant, site };
+}
+
+function workdayApiBase(config: JsonRecord = {}) {
+  const { host, tenant, site } = workdayConfig(config);
+  return `https://${host}/wday/cxs/${encodeURIComponent(tenant)}/${encodeURIComponent(site)}`;
+}
+
+async function fetchWorkdayJson(url: string, body?: JsonRecord) {
+  const response = await fetch(url, {
+    method: body ? "POST" : "GET",
+    headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), "User-Agent": "AppliHero Job Monitor/1.0" },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`Workday careers source returned ${response.status}`);
+  return response.json() as Promise<JsonRecord>;
+}
+
+async function fetchWorkday(config: JsonRecord = {}): Promise<NormalizedSourceJob[]> {
+  const requestedLimit = Number(config.maxJobs);
+  const maxJobs = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 100) : 100;
+  const payload = await fetchWorkdayJson(`${workdayApiBase(config)}/jobs`, { limit: maxJobs, offset: 0, searchText: "" });
+  const { host, site } = workdayConfig(config);
+  return (Array.isArray(payload.jobPostings) ? payload.jobPostings : []).slice(0, maxJobs).map((row: JsonRecord) => {
+    const externalPath = String(row.externalPath || "");
+    const jobReqId = String(row.bulletFields?.[0] || row.jobReqId || externalPath);
+    const sourceUrl = new URL(`/${encodeURIComponent(site)}${externalPath}`, `https://${host}`).toString();
+    return normalizedJob({ id: jobReqId, title: String(row.title || "Untitled role"), location: String(row.locationsText || "") || null, sourceUrl, applyUrl: sourceUrl, raw: row, parseRequirements: false });
+  });
+}
+
+async function hydrateWorkdayJob(source: { config?: JsonRecord }, job: NormalizedSourceJob): Promise<NormalizedSourceJob> {
+  const config = source.config || {};
+  const externalPath = String((job.raw_payload as JsonRecord)?.externalPath || "");
+  if (!/^\/job\/[A-Za-z0-9_./-]+$/.test(externalPath)) throw new Error("Invalid Workday job path");
+  const payload = await fetchWorkdayJson(`${workdayApiBase(config)}${externalPath}`);
+  const info = payload.jobPostingInfo as JsonRecord | undefined;
+  if (!info) throw new Error(`Workday job ${job.source_job_id} is unavailable`);
+  const { host, site } = workdayConfig(config);
+  const sourceUrl = String(info.externalUrl || new URL(`/${encodeURIComponent(site)}${externalPath}`, `https://${host}`).toString());
+  return normalizedJob({
+    id: String(info.jobReqId || job.source_job_id), title: String(info.title || job.title), html: String(info.jobDescription || ""),
+    location: [info.location, ...(Array.isArray(info.additionalLocations) ? info.additionalLocations : [])].filter(Boolean).join("; ") || job.location,
+    employment: String(info.timeType || "") || job.employment_type, sourceUrl, applyUrl: sourceUrl,
+    publishedAt: String(info.startDate || "") || null, deadline: String(info.endDate || "") || null,
+    raw: { ...job.raw_payload, ...info },
+  });
 }
 
 function attributesFor(row: JsonRecord): Map<string, unknown> {
@@ -418,12 +483,23 @@ export function sourceFromCareerUrl(companyName: string, rawUrl: string): Source
   let externalKey = `${host}${url.pathname}`.replace(/\/$/, "");
   let config: Record<string, unknown> = { careerUrl: url.toString() };
 
-  if (host === "boards.greenhouse.io" || host === "job-boards.greenhouse.io") {
+  // A branded career landing page often redirects people into an ATS, but
+  // server-side verification cannot infer that from its HTML alone. Keep a
+  // known official mapping so either of NVIDIA's public entry URLs works.
+  if ((host === "jobs.nvidia.com" || host.endsWith(".nvidia.com")) && /career/i.test(url.pathname)) {
+    provider = "workday";
+    externalKey = "nvidia/NVIDIAExternalCareerSite";
+    config = { host: "nvidia.wd5.myworkdayjobs.com", tenant: "nvidia", site: "NVIDIAExternalCareerSite" };
+  } else if (host === "boards.greenhouse.io" || host === "job-boards.greenhouse.io") {
     provider = "greenhouse"; externalKey = parts[0] || ""; config = { boardToken: externalKey };
   } else if (host === "jobs.lever.co") {
     provider = "lever"; externalKey = parts[0] || ""; config = { site: externalKey };
   } else if (host === "jobs.ashbyhq.com") {
     provider = "ashby"; externalKey = parts[0] || ""; config = { board: externalKey };
+  } else if (/^[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com$/.test(host) && parts.length >= 1) {
+    const site = parts[0];
+    const tenant = host.split(".")[0];
+    provider = "workday"; externalKey = `${tenant}/${site}`; config = { host, tenant, site };
   } else if ((host === "ibm.com" || host === "www.ibm.com") && url.pathname.replace(/\/$/, "") === "/careers/search") {
     provider = "ibm"; externalKey = "careers2"; config = { appId: "careers", scope: "careers2" };
   } else if (host === "careers.americanexpress.com" && parts.includes("CX_1")) {
@@ -479,7 +555,10 @@ async function discoverFromOfficialSites(companyName: string): Promise<SourceCon
       const finalUrl = new URL(response.url);
       if (finalUrl.protocol !== "https:" || isIP(finalUrl.hostname) || finalUrl.hostname === "localhost") return null;
       const html = (await response.text()).slice(0, 1_000_000);
-      const atsUrls = Array.from(html.matchAll(/https:\/\/(?:job-boards\.greenhouse\.io|boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com)\/[A-Za-z0-9_-]+/gi))
+      // Detect the major public ATS hosts from an employer's own career page.
+      // Workday boards generally do not publish schema.org records, so they
+      // must be recognized before falling back to generic HTML extraction.
+      const atsUrls = Array.from(html.matchAll(/https:\/(?:(?:\/)(?:job-boards\.greenhouse\.io|boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com)\/[A-Za-z0-9_-]+|\/[A-Za-z0-9-]+\.wd\d+\.myworkdayjobs\.com\/[A-Za-z0-9_-]+)/gi))
         .map(match => match[0]);
       for (const atsUrl of Array.from(new Set(atsUrls))) {
         const source = sourceFromCareerUrl(companyName, atsUrl);
@@ -524,6 +603,7 @@ export async function fetchSourceJobs(source: { provider: JobProvider; external_
     case "greenhouse": return fetchGreenhouseBoard(source.config?.boardToken || source.external_key, { parseRequirements: false });
     case "lever": return fetchLever(source.config?.site || source.external_key);
     case "ashby": return fetchAshby(source.config?.board || source.external_key);
+    case "workday": return fetchWorkday(source.config);
     case "ibm": return fetchIbm(source.config);
     case "oracle": return fetchOracle(source.config);
     case "amazon": return fetchAmazon(source.config);
@@ -533,7 +613,9 @@ export async function fetchSourceJobs(source: { provider: JobProvider; external_
 }
 
 export async function hydrateSourceJob(source: { provider: JobProvider; config?: JsonRecord }, job: NormalizedSourceJob) {
-  return source.provider === "oracle" ? hydrateOracleJob(source, job) : job;
+  if (source.provider === "oracle") return hydrateOracleJob(source, job);
+  if (source.provider === "workday") return hydrateWorkdayJob(source, job);
+  return job;
 }
 
 export function prepareSourceJob(job: NormalizedSourceJob): NormalizedSourceJob {

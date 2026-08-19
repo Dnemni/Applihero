@@ -25,7 +25,7 @@ function companyInitials(company: string) {
 }
 
 function providerLabel(provider: DiscoverySource["provider"]) {
-  return provider === "ibm" ? "IBM" : provider.replace("_", " ");
+  return provider === "ibm" ? "IBM" : provider === "workday" ? "Workday" : provider.replace("_", " ");
 }
 
 function timeAgo(value: string | null): string {

@@ -68,12 +68,29 @@ function asDiscoveryJob(job: NormalizedSourceJob, source: any): DiscoveryJob {
 
 async function upsertInChunks(table: string, rows: any[], options: Record<string, unknown>) {
   // Discovery job rows can contain large descriptions and raw provider
-  // payloads. Small transactions avoid Supabase statement timeouts while the
-  // unique constraints keep retries idempotent.
-  const chunkSize = table === "discovery_jobs" ? 20 : 50;
+  // payloads. The database's uniqueness constraints make retried and split
+  // writes idempotent, so a temporarily expensive provider payload cannot
+  // turn a successful scan into a source failure.
+  const chunkSize = table === "discovery_jobs" ? 10 : 25;
+  const isStatementTimeout = (error: any) => /statement timeout|canceling statement/i.test(String(error?.message || error?.details || error));
+  const write = async (chunk: any[]): Promise<void> => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { error } = await db().from(table).upsert(chunk, options);
+      if (!error) return;
+      if (!isStatementTimeout(error) || attempt === 1) {
+        if (isStatementTimeout(error) && chunk.length > 1) {
+          const middle = Math.ceil(chunk.length / 2);
+          await write(chunk.slice(0, middle));
+          await write(chunk.slice(middle));
+          return;
+        }
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250 + Math.floor(Math.random() * 150)));
+    }
+  };
   for (let index = 0; index < rows.length; index += chunkSize) {
-    const { error } = await db().from(table).upsert(rows.slice(index, index + chunkSize), options);
-    if (error) throw error;
+    await write(rows.slice(index, index + chunkSize));
   }
 }
 
@@ -257,7 +274,7 @@ export async function syncSource(source: any): Promise<SyncResult> {
       .sort((a, b) => new Date(b.source_published_at || 0).getTime() - new Date(a.source_published_at || 0).getTime())
       .slice(0, MAX_SOURCE_CATALOG_JOBS);
 
-    const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters";
+    const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters" || sourceForFetch.provider === "avature" || sourceForFetch.provider === "indexed_site" || sourceForFetch.provider === "career_site";
     const cachedSourceJobs = newestSourceJobs.map(job => asCachedSourceJob(job, existingBySourceJob.get(job.source_job_id)));
     const candidatesByUser = new Map<string, NormalizedSourceJob[]>();
     const candidatesToHydrate = new Map<string, NormalizedSourceJob>();

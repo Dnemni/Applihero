@@ -50,3 +50,31 @@ export async function searchOfficialCompanyCareers(companyName: string): Promise
     await transport.close().catch(() => undefined);
   }
 }
+
+export async function searchOfficialCompanyJobs(companyName: string, officialUrl: string): Promise<SearchHit[]> {
+  const official = new URL(officialUrl);
+  const client = new Client({ name: "applihero-job-index", version: "1.0.0" });
+  const transport = new StreamableHTTPClientTransport(new URL("https://search.parallel.ai/mcp"), {
+    requestInit: { headers: { "User-Agent": "AppliHero Job Monitor/1.0" } },
+  });
+  try {
+    await client.connect(transport);
+    const result = await client.callTool({
+      name: "web_search",
+      arguments: {
+        search_queries: [
+          `site:${official.hostname} "${companyName}" open jobs`,
+          `site:${official.hostname} "${companyName}" software engineering jobs`,
+          `site:${official.hostname} "${companyName}" internship jobs`,
+        ],
+        objective: `Find current individual job-detail pages on ${official.hostname} for ${companyName}. Return direct official posting URLs, titles, and excerpts. Exclude search pages, category pages, expired mirrors, aggregators, and other employers.`,
+      },
+    }, undefined, { timeout: 45_000, maxTotalTimeout: 50_000 });
+    if (result.isError) return [];
+    return flattenHits(result.structuredContent || parseTextPayload(result.content));
+  } catch {
+    return [];
+  } finally {
+    await transport.close().catch(() => undefined);
+  }
+}

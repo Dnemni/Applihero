@@ -199,6 +199,55 @@ test("Jibe normalizes its first-party jobs API without leaking location internal
   }
 });
 
+test("generic career pages inventory linked roles and hydrate details separately", { concurrency: false }, async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async input => {
+    const url = String(input);
+    const html = url.endsWith("/jobs")
+      ? `<main><a href="/jobs/software-engineer-12345">Software Engineer Intern</a></main>`
+      : `<main><h1>Software Engineer Intern</h1><section><h2>Qualifications</h2><p>Currently pursuing a bachelor's degree in Computer Science and proficient in Python.</p><p>Join the engineering team to build reliable developer tools for customers around the world.</p></section></main>`;
+    const response = new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    Object.defineProperty(response, "url", { value: url });
+    return response;
+  };
+  try {
+    const source = { provider: "career_site" as const, external_key: "acme/jobs", career_url: "https://careers.acme.com/jobs", config: { maxJobs: 5 } };
+    const result = await fetchSourceJobsWithMeta(source);
+    assert.equal(result.jobs.length, 1);
+    assert.equal(result.jobs[0].description, "");
+    const hydrated = await hydrateSourceJob(source, result.jobs[0]);
+    assert.match(hydrated.description, /bachelor's degree/);
+    assert.equal(hydrated.title, "Software Engineer Intern");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("Avature consumes the provider RSS inventory without treating snippets as requirements", { concurrency: false }, async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async input => {
+    const response = new Response(`<?xml version="1.0"?><rss><channel><item>
+      <title><![CDATA[Game Engineering Intern]]></title>
+      <link>https://jobs.acme.com/en_US/careers/JobDetail/Game-Engineering-Intern/12345</link>
+      <pubDate>Wed, 26 Aug 2026 12:00:00 +0000</pubDate>
+    </item></channel></rss>`, { status: 200, headers: { "content-type": "application/rss+xml" } });
+    Object.defineProperty(response, "url", { value: String(input) });
+    return response;
+  };
+  try {
+    const result = await fetchSourceJobsWithMeta({
+      provider: "avature", external_key: "jobs.acme.com/careers",
+      config: { baseUrl: "https://jobs.acme.com", locale: "en_US", portal: "careers", maxJobs: 5 },
+    });
+    assert.equal(result.jobs.length, 1);
+    assert.equal(result.jobs[0].source_job_id, "12345");
+    assert.equal(result.jobs[0].title, "Game Engineering Intern");
+    assert.equal(result.jobs[0].source_published_source, "avature.rss.pubDate");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("known branded URLs resolve to their provider adapters", () => {
   assert.equal(sourceFromCareerUrl("NVIDIA", "https://jobs.nvidia.com/careers").provider, "workday");
   assert.equal(sourceFromCareerUrl("Microsoft", "https://apply.careers.microsoft.com/careers").provider, "eightfold");

@@ -1,4 +1,4 @@
-export type JobProvider = "greenhouse" | "lever" | "ashby" | "workable" | "smartrecruiters" | "workday" | "eightfold" | "jibe" | "ibm" | "oracle" | "successfactors" | "amazon" | "career_site";
+export type JobProvider = "greenhouse" | "lever" | "ashby" | "workable" | "smartrecruiters" | "workday" | "eightfold" | "jibe" | "ibm" | "oracle" | "successfactors" | "amazon" | "avature" | "indexed_site" | "career_site";
 export type DiscoveryJobStatus = "open" | "unverified" | "closed";
 export type RequirementPriority = "minimum" | "preferred";
 export type RequirementCategory =

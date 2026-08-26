@@ -1,7 +1,7 @@
 import { isIP } from "node:net";
 import { fetchGreenhouseBoard } from "./greenhouse";
 import { hashText, htmlToPlainText, parseJobRequirements, REQUIREMENTS_PARSER_VERSION } from "./parser";
-import { searchOfficialCompanyCareers } from "./parallel-search";
+import { searchOfficialCompanyCareers, searchOfficialCompanyJobs } from "./parallel-search";
 import type { JobProvider } from "./types";
 
 export type NormalizedSourceJob = Awaited<ReturnType<typeof fetchGreenhouseBoard>>[number] & {
@@ -110,6 +110,18 @@ const KNOWN_COMPANIES: Array<SourceConfig & { aliases: string[] }> = [
     },
     aliases: ["american express", "amex", "american express company"],
   },
+  { provider: "career_site", externalKey: "jobs.apple.com/en-us/search", companyName: "Apple", careerUrl: "https://jobs.apple.com/en-us/search", config: { careerUrl: "https://jobs.apple.com/en-us/search", maxJobs: 100 }, aliases: ["apple", "apple inc"] },
+  { provider: "career_site", externalKey: "google.com/about/careers/applications/jobs/results", companyName: "Google", careerUrl: "https://www.google.com/about/careers/applications/jobs/results", config: { careerUrl: "https://www.google.com/about/careers/applications/jobs/results", maxJobs: 100 }, aliases: ["google", "google llc", "alphabet"] },
+  { provider: "indexed_site", externalKey: "metacareers.com/jobs", companyName: "Meta", careerUrl: "https://www.metacareers.com/jobs", config: { companyName: "Meta", baseUrl: "https://www.metacareers.com/jobs", maxJobs: 20 }, aliases: ["meta", "meta platforms", "facebook"] },
+  { provider: "indexed_site", externalKey: "higher.gs.com/results", companyName: "Goldman Sachs", careerUrl: "https://higher.gs.com/results", config: { companyName: "Goldman Sachs", baseUrl: "https://higher.gs.com/results", maxJobs: 20 }, aliases: ["goldman sachs", "goldman sachs group"] },
+  { provider: "indexed_site", externalKey: "careers.walmart.com/results", companyName: "Walmart", careerUrl: "https://careers.walmart.com/results", config: { companyName: "Walmart", baseUrl: "https://careers.walmart.com/results", maxJobs: 20 }, aliases: ["walmart", "walmart inc"] },
+  { provider: "eightfold", externalKey: "lockheedmartin.eightfold.ai/lockheedmartin.com", companyName: "Lockheed Martin", careerUrl: "https://lockheedmartin.eightfold.ai/careers", config: { apiUrl: "https://lockheedmartin.eightfold.ai/api/pcsx/search", domain: "lockheedmartin.com", origin: "https://lockheedmartin.eightfold.ai", maxJobs: 100 }, aliases: ["lockheed martin", "lockheed martin corporation"] },
+  { provider: "indexed_site", externalKey: "atlassian.com/company/careers/all-jobs", companyName: "Atlassian", careerUrl: "https://www.atlassian.com/company/careers/all-jobs", config: { companyName: "Atlassian", baseUrl: "https://www.atlassian.com/company/careers/all-jobs", maxJobs: 20 }, aliases: ["atlassian", "atlassian corporation"] },
+  { provider: "indexed_site", externalKey: "lifeattiktok.com/search", companyName: "TikTok", careerUrl: "https://lifeattiktok.com/search", config: { companyName: "TikTok", baseUrl: "https://lifeattiktok.com/search", maxJobs: 20 }, aliases: ["tiktok", "tik tok"] },
+  { provider: "indexed_site", externalKey: "careers.zoom.us/jobs", companyName: "Zoom", careerUrl: "https://careers.zoom.us/jobs/search", config: { companyName: "Zoom", baseUrl: "https://careers.zoom.us/jobs/search", maxJobs: 20 }, aliases: ["zoom", "zoom video communications"] },
+  { provider: "avature", externalKey: "jobs.ea.com/careers", companyName: "Electronic Arts", careerUrl: "https://jobs.ea.com/en_US/careers", config: { baseUrl: "https://jobs.ea.com", locale: "en_US", portal: "careers", maxJobs: 100 }, aliases: ["electronic arts", "ea", "electronic arts inc"] },
+  { provider: "career_site", externalKey: "shopify.com/careers", companyName: "Shopify", careerUrl: "https://www.shopify.com/careers", config: { careerUrl: "https://www.shopify.com/careers", maxJobs: 100 }, aliases: ["shopify", "shopify inc"] },
+  { provider: "indexed_site", externalKey: "ats.rippling.com/rippling/jobs", companyName: "Rippling", careerUrl: "https://ats.rippling.com/rippling/jobs", config: { companyName: "Rippling", baseUrl: "https://ats.rippling.com/rippling/jobs", maxJobs: 20 }, aliases: ["rippling", "rippling people center"] },
 ];
 
 function employmentType(text: string): string | null {
@@ -865,6 +877,77 @@ function schemaPostings(html: string): JsonRecord[] {
   });
 }
 
+function htmlAttribute(tag: string, name: string): string | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return tag.match(new RegExp(`${escaped}=["']([^"']+)["']`, "i"))?.[1] || null;
+}
+
+function jobPathLooksSpecific(url: URL): boolean {
+  const path = url.pathname.replace(/\/$/, "");
+  if (/\/(?:search|all-jobs|job-search|careers|jobs)$/i.test(path)) return false;
+  return /\/(?:details?|jobdetail|positions?|roles?|search)\/[A-Za-z0-9_-]{3,}/i.test(path)
+    || /\/jobs?\/(?:[^/]+\/)*[A-Za-z0-9_-]*(?:\d{4,}|[0-9a-f]{8}-[0-9a-f-]{20,})[A-Za-z0-9_-]*/i.test(path)
+    || /\/careers\/[A-Za-z0-9_-]+_[0-9a-f-]{20,}$/i.test(path);
+}
+
+function titleFromJobUrl(url: URL): string {
+  const segment = url.pathname.split("/").filter(Boolean).reverse()
+    .find(value => !/^\d+$/.test(value) && !/^[0-9a-f-]{20,}$/i.test(value)) || "Open role";
+  return decodeURIComponent(segment).replace(/[-_]+/g, " ").replace(/\b\w/g, value => value.toUpperCase());
+}
+
+function linkedJobPostings(html: string, finalUrl: URL, maxJobs: number): NormalizedSourceJob[] {
+  const jobs = new Map<string, NormalizedSourceJob>();
+  const anchors = html.matchAll(/<a\b[^>]*href=["'][^"'#]+["'][^>]*>[\s\S]*?<\/a>/gi);
+  for (const match of anchors) {
+    const href = htmlAttribute(match[0], "href");
+    if (!href) continue;
+    let jobUrl: URL;
+    try { jobUrl = new URL(htmlToPlainText(href), finalUrl); } catch { continue; }
+    if (jobUrl.protocol !== "https:" || !jobPathLooksSpecific(jobUrl)) continue;
+    if (/linkedin\.com|indeed\.com|glassdoor\.com|facebook\.com/i.test(jobUrl.hostname)) continue;
+    jobUrl.hash = "";
+    const titleText = htmlToPlainText(match[0]).replace(/\s+/g, " ").trim();
+    const title = titleText.length >= 3 && titleText.length <= 180 && !/^(?:apply|learn more|view|read more)$/i.test(titleText)
+      ? titleText : titleFromJobUrl(jobUrl);
+    const id = jobUrl.pathname.match(/(?:details?|jobdetail|positions?|roles?|search)\/([^/?#]+)/i)?.[1]
+      || jobUrl.pathname.match(/(\d{4,}|[0-9a-f]{8}-[0-9a-f-]{20,})/i)?.[1]
+      || jobUrl.toString();
+    if (!jobs.has(id)) jobs.set(id, normalizedJob({
+      id, title, sourceUrl: jobUrl.toString(), applyUrl: jobUrl.toString(),
+      raw: { sourceUrl: jobUrl.toString(), title }, parseRequirements: false,
+    }));
+    if (jobs.size >= maxJobs) break;
+  }
+  return Array.from(jobs.values());
+}
+
+function postingFromHtml(html: string, finalUrl: URL, fallback: NormalizedSourceJob): NormalizedSourceJob {
+  const posting = schemaPostings(html)[0];
+  if (posting) {
+    const address = Array.isArray(posting.jobLocation) ? posting.jobLocation[0]?.address : posting.jobLocation?.address;
+    const location = typeof address === "string" ? address : [address?.addressLocality, address?.addressRegion, address?.addressCountry].filter(Boolean).join(", ");
+    return normalizedJob({
+      id: fallback.source_job_id, title: String(posting.title || fallback.title), html: String(posting.description || ""),
+      location: location || fallback.location, employment: Array.isArray(posting.employmentType) ? posting.employmentType.join(", ") : posting.employmentType,
+      sourceUrl: String(posting.url || finalUrl), applyUrl: String(posting.url || finalUrl), publishedAt: posting.datePosted,
+      deadline: posting.validThrough, raw: posting,
+    });
+  }
+  const h1 = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const metaTitle = html.match(/<meta\b[^>]*(?:property|name)=["'](?:og:title|twitter:title)["'][^>]*content=["']([^"']+)/i)?.[1];
+  const main = html.match(/<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)>/i)?.[1];
+  const body = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html;
+  const content = (main || body).replace(/<(?:script|style|nav|header|footer)\b[\s\S]*?<\/(?:script|style|nav|header|footer)>/gi, "");
+  const description = htmlToPlainText(content).replace(/\s+/g, " ").trim().slice(0, 80_000);
+  const title = htmlToPlainText(h1 || metaTitle || "").replace(/\s+/g, " ").trim() || fallback.title;
+  if (description.length < 200) return fallback;
+  return normalizedJob({
+    id: fallback.source_job_id, title, description, location: fallback.location,
+    sourceUrl: finalUrl.toString(), applyUrl: finalUrl.toString(), raw: { sourceUrl: finalUrl.toString(), title },
+  });
+}
+
 async function fetchCareerHtml(url: URL) {
   const response = await fetch(url, {
     headers: { Accept: "text/html", "User-Agent": "AppliHero Job Monitor/1.0" },
@@ -878,31 +961,20 @@ async function fetchCareerHtml(url: URL) {
   return { html: (await response.text()).slice(0, 2_000_000), finalUrl };
 }
 
-async function fetchCareerPage(url: string): Promise<NormalizedSourceJob[]> {
+async function fetchCareerPage(url: string, requestedMaxJobs = 100): Promise<NormalizedSourceJob[]> {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" || isIP(parsed.hostname) || parsed.hostname === "localhost") {
     throw new Error("Career pages must use a public HTTPS hostname");
   }
   const { html, finalUrl } = await fetchCareerHtml(parsed);
-  let postings = schemaPostings(html);
+  const maxJobs = Math.max(1, Math.min(Number.isFinite(requestedMaxJobs) ? requestedMaxJobs : 100, 100));
+  const postings = schemaPostings(html);
   if (!postings.length) {
-    const organizationSuffix = finalUrl.hostname.split(".").slice(-2).join(".");
-    const detailUrls = Array.from(html.matchAll(/href=["']([^"'#]+)["']/gi))
-      .map(match => {
-        try { return new URL(match[1], finalUrl); } catch { return null; }
-      })
-      .filter((candidate): candidate is URL => Boolean(candidate && candidate.protocol === "https:" && (candidate.hostname === organizationSuffix || candidate.hostname.endsWith(`.${organizationSuffix}`)) && /\b(?:job|jobs|career|careers|opening|position)s?\b/i.test(candidate.pathname)))
-      .filter((candidate, index, all) => all.findIndex(item => item.toString() === candidate.toString()) === index)
-      .slice(0, 12);
-    for (let index = 0; index < detailUrls.length && !postings.length; index += 4) {
-      const pages = await Promise.all(detailUrls.slice(index, index + 4).map(async detailUrl => {
-        try { return await fetchCareerHtml(detailUrl); } catch { return null; }
-      }));
-      postings = pages.flatMap(page => page ? schemaPostings(page.html).map(posting => ({ ...posting, url: posting.url || page.finalUrl.toString() })) : []);
-    }
+    const linked = linkedJobPostings(html, finalUrl, maxJobs);
+    if (linked.length) return linked;
+    throw new Error("No job records or job-detail links were found on this page");
   }
-  if (!postings.length) throw new Error("No schema.org JobPosting records were found on this page");
-  return postings.filter(row => typeof row.title === "string" && row.title.trim()).map((row, index) => {
+  return postings.filter(row => typeof row.title === "string" && row.title.trim()).slice(0, maxJobs).map((row, index) => {
     const location = row.jobLocation?.address;
     const locationText = typeof location === "string" ? location : [location?.addressLocality, location?.addressRegion, location?.addressCountry].filter(Boolean).join(", ");
     const jobUrl = row.url || `${url}#job-${index}`;
@@ -915,6 +987,65 @@ async function fetchCareerPage(url: string): Promise<NormalizedSourceJob[]> {
       parseRequirements: false,
     });
   });
+}
+
+async function hydrateCareerSiteJob(_source: { config?: JsonRecord }, job: NormalizedSourceJob) {
+  const page = await fetchCareerHtml(new URL(job.source_url));
+  return postingFromHtml(page.html, page.finalUrl, job);
+}
+
+async function fetchAvature(config: JsonRecord = {}): Promise<NormalizedSourceJob[]> {
+  const origin = safePublicOrigin(config.baseUrl);
+  const locale = String(config.locale || "en_US").replace(/[^A-Za-z_]/g, "") || "en_US";
+  const portal = String(config.portal || "careers").replace(/[^A-Za-z0-9_-]/g, "") || "careers";
+  const requested = Number(config.maxJobs || 100);
+  const maxJobs = Math.max(1, Math.min(Number.isFinite(requested) ? requested : 100, 100));
+  const page = await fetchCareerHtml(new URL(`/${locale}/${portal}/Home/feed/?jobRecordsPerPage=${maxJobs}`, origin));
+  const items = Array.from(page.html.matchAll(/<item>([\s\S]*?)<\/item>/gi)).slice(0, maxJobs);
+  const xmlText = (value: string) => htmlToPlainText(value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).trim();
+  return items.flatMap((match, index) => {
+    const item = match[1];
+    const title = xmlText(item.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "");
+    const link = xmlText(item.match(/<link>([\s\S]*?)<\/link>/i)?.[1] || item.match(/<guid[^>]*>([\s\S]*?)<\/guid>/i)?.[1] || "");
+    if (!title || !link) return [];
+    const id = new URL(link).pathname.match(/\/(\d+)\/?$/)?.[1] || link;
+    const published = xmlText(item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1] || "");
+    return [normalizedJob({
+      id, title, sourceUrl: link, applyUrl: link,
+      publishedAt: published ? new Date(published).toISOString() : null,
+      publishedSource: published ? "avature.rss.pubDate" : null,
+      raw: { index, title, link, published }, parseRequirements: false,
+    })];
+  });
+}
+
+async function fetchIndexedSite(config: JsonRecord = {}): Promise<NormalizedSourceJob[]> {
+  const companyName = String(config.companyName || "").trim();
+  const baseUrl = String(config.baseUrl || "").trim();
+  if (!companyName || !baseUrl) throw new Error("Indexed career source is missing company identity");
+  const official = new URL(baseUrl);
+  const requested = Number(config.maxJobs || 20);
+  const maxJobs = Math.max(1, Math.min(Number.isFinite(requested) ? requested : 20, 50));
+  const hits = await searchOfficialCompanyJobs(companyName, baseUrl);
+  const jobs = new Map<string, NormalizedSourceJob>();
+  for (const hit of hits) {
+    let url: URL;
+    try { url = new URL(hit.url); } catch { continue; }
+    const sameOrganization = url.hostname === official.hostname || url.hostname.endsWith(`.${official.hostname}`) || official.hostname.endsWith(`.${url.hostname}`);
+    if (!sameOrganization || !jobPathLooksSpecific(url)) continue;
+    const title = String(hit.title || titleFromJobUrl(url)).replace(/\s+[|–—-]\s+[^|–—]+$/, "").trim();
+    const description = Array.isArray(hit.excerpts) ? hit.excerpts.join("\n") : "";
+    const id = url.pathname.match(/(?:details?|jobdetail|positions?|roles?|search)\/([^/?#]+)/i)?.[1]
+      || url.pathname.match(/(\d{4,}|[0-9a-f]{8}-[0-9a-f-]{20,})/i)?.[1]
+      || url.toString();
+    if (!jobs.has(id)) jobs.set(id, normalizedJob({
+      id, title, description, sourceUrl: url.toString(), applyUrl: url.toString(),
+      raw: { title, url: url.toString(), excerpts: hit.excerpts || [] }, parseRequirements: false,
+    }));
+    if (jobs.size >= maxJobs) break;
+  }
+  if (!jobs.size) throw new Error("Official job index returned no current job-detail pages");
+  return Array.from(jobs.values());
 }
 
 export async function verifySourceConfig(source: SourceConfig) {
@@ -1018,6 +1149,13 @@ async function sourceExists(source: SourceConfig): Promise<boolean> {
 }
 
 function sourceFromCareerEvidence(companyName: string, finalUrl: URL, html: string): SourceConfig {
+  // Several branded Eightfold tenants serialize their bootstrap settings into
+  // HTML attributes, so quotes arrive entity-encoded (for example
+  // `domain&#34;: &#34;lockheedmartin.com&#34;`). Decode only the entities needed for
+  // provider detection; the original document remains untouched for parsing.
+  const providerEvidence = html
+    .replace(/&quot;|&#34;|&#x22;/gi, '"')
+    .replace(/&amp;/gi, "&");
   const embeddedAts = html.match(/https:\/\/[A-Za-z0-9-]+\.wd\d+\.myworkdayjobs\.com\/[A-Za-z0-9_-]+/i)?.[0]
     || html.match(/https:\/\/(?:job-boards\.greenhouse\.io|boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|careers\.smartrecruiters\.com|jobs\.smartrecruiters\.com)\/[A-Za-z0-9_-]+/i)?.[0];
   if (embeddedAts) return sourceFromCareerUrl(companyName, embeddedAts);
@@ -1030,8 +1168,8 @@ function sourceFromCareerEvidence(companyName: string, finalUrl: URL, html: stri
       config: { baseUrl: finalUrl.origin, maxJobs: 100 },
     };
   }
-  const eightfoldDomain = finalUrl.searchParams.get("domain") || html.match(/(?:[?&]|["']domain["']?\s*[:=]\s*["']?)([A-Za-z0-9.-]+\.[A-Za-z]{2,})/i)?.[1];
-  if (eightfoldDomain && (/\/careers\b/.test(finalUrl.pathname) || /\/api\/pcsx\/search/i.test(html))) {
+  const eightfoldDomain = finalUrl.searchParams.get("domain") || providerEvidence.match(/(?:[?&]|["']domain["']?\s*[:=]\s*["']?)([A-Za-z0-9.-]+\.[A-Za-z]{2,})/i)?.[1];
+  if (eightfoldDomain && (/\/careers\b/.test(finalUrl.pathname) || /\/api\/pcsx\/search/i.test(providerEvidence))) {
     return {
       provider: "eightfold",
       externalKey: `${finalUrl.hostname}/${eightfoldDomain}`,
@@ -1072,6 +1210,18 @@ function sourceFromCareerEvidence(companyName: string, finalUrl: URL, html: stri
       config: { baseUrl: finalUrl.origin, searchPath: finalUrl.pathname.includes("/search") ? finalUrl.pathname : "/search/", maxJobs: 100 },
     };
   }
+  if (/avature\.portal\.(?:id|name|urlPath)|\/careers\/Home\/feed\//i.test(providerEvidence)) {
+    const locale = providerEvidence.match(/avature\.portal\.lang["']?\s*(?:content=|[:=]\s*)["']?([A-Za-z_]+)/i)?.[1] || "en_US";
+    const portal = providerEvidence.match(/avature\.portal\.urlPath["']?\s*(?:content=|[:=]\s*)["']?([A-Za-z0-9_-]+)/i)?.[1]
+      || finalUrl.pathname.split("/").filter(Boolean)[1] || "careers";
+    return {
+      provider: "avature",
+      externalKey: `${finalUrl.hostname}/${portal}`,
+      companyName: companyName.trim(),
+      careerUrl: finalUrl.toString(),
+      config: { baseUrl: finalUrl.origin, locale, portal, maxJobs: 100 },
+    };
+  }
   return sourceFromCareerUrl(companyName, finalUrl.toString());
 }
 
@@ -1083,10 +1233,21 @@ function firstPartyCareerHit(companyName: string, rawUrl: string) {
     if (denied.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) return false;
     const keys = companySlugs(companyName).map(slug => slug.replace(/-/g, ""));
     const labels = url.hostname.toLowerCase().split(".").map(label => label.replace(/[^a-z0-9]/g, ""));
-    return keys.some(key => key.length >= 3 && labels.some(label => label === key || label === `careers${key}` || label === `jobs${key}`));
+    return keys.some(key => key.length >= 3 && labels.some(label => label === key || label === `careers${key}` || label === `jobs${key}` || label === `${key}careers` || label === `${key}jobs`));
   } catch {
     return false;
   }
+}
+
+function indexedSource(companyName: string, officialUrl: string): SourceConfig {
+  const url = new URL(officialUrl);
+  return {
+    provider: "indexed_site",
+    externalKey: `${url.hostname}${url.pathname}`.replace(/\/$/, ""),
+    companyName: companyName.trim(),
+    careerUrl: url.toString(),
+    config: { companyName: companyName.trim(), baseUrl: url.toString(), maxJobs: 20 },
+  };
 }
 
 async function discoverFromParallelSearch(companyName: string): Promise<SourceConfig | null> {
@@ -1097,6 +1258,8 @@ async function discoverFromParallelSearch(companyName: string): Promise<SourceCo
       const page = await fetchCareerHtml(new URL(candidate));
       const source = sourceFromCareerEvidence(companyName, page.finalUrl, page.html);
       if (await sourceExists(source)) return source;
+      const fallback = indexedSource(companyName, page.finalUrl.toString());
+      if (await sourceExists(fallback)) return fallback;
     } catch {
       // Search results are hints. Only a live, company-owned page and a
       // non-empty provider result become a persisted source.
@@ -1149,6 +1312,8 @@ async function discoverFromOfficialSites(companyName: string): Promise<SourceCon
       }
       const source = sourceFromCareerEvidence(companyName, finalUrl, html);
       if (await sourceExists(source)) return source;
+      const fallback = indexedSource(companyName, finalUrl.toString());
+      if (await sourceExists(fallback)) return fallback;
     } catch {
       // Candidate domains are intentionally best-effort; only verified feeds
       // are returned to the user for approval.
@@ -1218,7 +1383,9 @@ export async function fetchSourceJobsWithMeta(
     case "oracle": jobs = await fetchOracle(source.config); break;
     case "successfactors": jobs = await fetchSuccessFactors(source.config); break;
     case "amazon": jobs = await fetchAmazon(source.config); break;
-    case "career_site": jobs = await fetchCareerPage(source.career_url || source.config?.careerUrl); break;
+    case "avature": jobs = await fetchAvature(source.config); break;
+    case "indexed_site": jobs = await fetchIndexedSite(source.config); break;
+    case "career_site": jobs = await fetchCareerPage(source.career_url || source.config?.careerUrl, Number(source.config?.maxJobs || context.maxJobs || 100)); break;
     default: throw new Error(`Unsupported job source: ${source.provider}`);
   }
   return { jobs, meta: scanMeta(source.provider, jobs, context) };
@@ -1232,6 +1399,9 @@ export async function hydrateSourceJob(source: { provider: JobProvider; config?:
   if (source.provider === "smartrecruiters") return hydrateSmartRecruitersJob(source, job);
   if (source.provider === "oracle") return hydrateOracleJob(source, job);
   if (source.provider === "successfactors") return hydrateSuccessFactorsJob(source, job);
+  if (source.provider === "avature") return hydrateCareerSiteJob(source, job);
+  if (source.provider === "indexed_site") return hydrateCareerSiteJob(source, job);
+  if (source.provider === "career_site") return hydrateCareerSiteJob(source, job);
   if (source.provider === "workday") return hydrateWorkdayJob(source, job);
   if (source.provider === "eightfold" && !job.description.trim()) {
     const [detail] = await fetchCareerPage(job.source_url);

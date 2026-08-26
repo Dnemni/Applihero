@@ -1,4 +1,4 @@
-export type JobProvider = "greenhouse" | "lever" | "ashby" | "workday" | "ibm" | "oracle" | "amazon" | "career_site";
+export type JobProvider = "greenhouse" | "lever" | "ashby" | "workable" | "smartrecruiters" | "workday" | "eightfold" | "jibe" | "ibm" | "oracle" | "successfactors" | "amazon" | "career_site";
 export type DiscoveryJobStatus = "open" | "unverified" | "closed";
 export type RequirementPriority = "minimum" | "preferred";
 export type RequirementCategory =
@@ -45,9 +45,15 @@ export interface DiscoveryJob {
   source_url: string;
   apply_url: string;
   source_published_at: string | null;
+  source_published_precision?: "instant" | "day" | "relative_day" | "unknown";
+  source_published_source?: string | null;
   source_updated_at: string | null;
   application_deadline: string | null;
   discovered_at: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
+  bootstrap_observed?: boolean;
+  enrichment_status?: "pending" | "processing" | "complete" | "failed";
   last_verified_at: string;
   status: DiscoveryJobStatus;
   parsed_requirements: ParsedRequirement[];
@@ -74,6 +80,8 @@ export interface QuickFit {
   matcherVersion?: string;
   evaluatedProfileHash?: string;
   evaluatedJobHash?: string;
+  discoveryEligible?: boolean;
+  discoveryEligibilityReason?: string;
   source?: "deterministic" | "analysis";
   score: number | null;
   band: FitBand;
@@ -145,6 +153,7 @@ export interface DiscoverySource {
   enabled: boolean;
   featured?: boolean;
   last_sync_completed_at: string | null;
+  next_sync_at?: string | null;
   last_sync_error: string | null;
   sync_interval_minutes: number;
   subscribed: boolean;

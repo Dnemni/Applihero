@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await requireApiUser(request);
     const [{ data: sources, error: sourceError }, { data: subscriptions, error: subscriptionError }, background, openJobs] = await Promise.all([
-      db().from("job_sources").select("id, provider, external_key, company_name, career_url, enabled, featured, last_sync_completed_at, last_sync_error, sync_interval_minutes").eq("enabled", true).order("featured", { ascending: false }).order("company_name"),
+      db().from("job_sources").select("id, provider, external_key, company_name, career_url, enabled, featured, last_sync_completed_at, next_sync_at, last_sync_error, sync_interval_minutes").eq("enabled", true).order("featured", { ascending: false }).order("company_name"),
       db().from("user_job_source_subscriptions").select("source_id, notify_email, min_fit_score").eq("user_id", user.id).eq("enabled", true),
       getUserBackground(user.id),
       getDiscoverySourceRecommendationCandidates(120),
@@ -73,13 +73,18 @@ export async function POST(request: NextRequest) {
     if (body.preview) {
       const companyName = String(body.companyName || "").trim();
       if (!companyName) return NextResponse.json({ error: "Enter a company name" }, { status: 400 });
-      const { data: existing, error: existingError } = await db().from("job_sources")
+      const { data: existingRows, error: existingError } = await db().from("job_sources")
         .select("id, provider, external_key, company_name, career_url")
         .ilike("company_name", companyName)
         .eq("enabled", true)
-        .limit(1)
-        .maybeSingle();
+        .limit(10);
       if (existingError) throw existingError;
+      // A company can have a legacy generic-page record and a newer verified
+      // provider adapter during a rolling migration. Always prefer the
+      // provider-backed source so searches do not resurrect the stale record.
+      const existing = (existingRows || []).sort((left: any, right: any) =>
+        Number(left.provider === "career_site") - Number(right.provider === "career_site")
+      )[0];
       if (existing?.career_url) return NextResponse.json({ suggestion: {
         companyName: existing.company_name, provider: existing.provider, externalKey: existing.external_key,
         careerUrl: existing.career_url, existingSourceId: existing.id,

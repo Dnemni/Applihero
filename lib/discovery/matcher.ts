@@ -13,7 +13,7 @@ import type {
 
 // Increment whenever deterministic eligibility semantics change so stored
 // recommendations are recalculated before they are shown again.
-export const MATCHER_VERSION = "eligibility-evidence-v23";
+export const MATCHER_VERSION = "eligibility-evidence-v28";
 
 const SENSITIVE_CATEGORIES = new Set(["work_authorization", "availability"]);
 
@@ -101,7 +101,10 @@ function matchingRequirements(job: DiscoveryJob): ParsedRequirement[] {
 }
 
 function graduationFit(requirement: ParsedRequirement, facts: ApplicantFacts, jobTitle: string): RequirementFit | null {
-  const requiresReturnToSchool = /return(?:ing)? to (?:school|university|college)|continue academic studies|currently enrolled|(?:semester|schooling|quarter).{0,30}(?:remaining|after)/i.test(requirement.text);
+  // Current enrollment is an education-level fact, not by itself a
+  // graduation-window requirement. Treating every "currently enrolled"
+  // sentence as timing used to bypass explicit bachelor/master conflicts.
+  const requiresReturnToSchool = /return(?:ing)? to (?:school|university|college)|continue academic studies|(?:semester|schooling|quarter).{0,30}(?:remaining|after)/i.test(requirement.text);
   if (requirement.category !== "graduation_window" && !requiresReturnToSchool) return null;
   if (!facts.graduationYear || !facts.graduationEvidence) {
     return {
@@ -185,6 +188,20 @@ function bandLabel(band: FitBand): string {
   }
 }
 
+export function applyDiscoveryEligibilityGate(quickFit: QuickFit, gate: { eligible: boolean; reason: string }): QuickFit {
+  if (gate.eligible) return { ...quickFit, discoveryEligible: true, discoveryEligibilityReason: gate.reason };
+  return {
+    ...quickFit,
+    discoveryEligible: false,
+    discoveryEligibilityReason: gate.reason,
+    score: 0,
+    band: "likely_conflict",
+    label: "Not eligible for this discovery scope",
+    reasons: [gate.reason],
+    eligibility: { status: "conflict", label: "Eligibility conflict", reasons: [gate.reason] },
+  };
+}
+
 function evidenceForRequirement(requirement: ParsedRequirement, background: string): string[] {
   const lines = background.split(/\n+/).map(line => line.trim()).filter(Boolean);
   if (!requirement.normalizedTerms.length) {
@@ -221,6 +238,53 @@ const DEGREE_DISCIPLINES = [
   "computer science", "data science", "information systems", "mathematics", "physics",
 ] as const;
 
+type DegreeLevel = "bachelor" | "master" | "doctorate";
+
+function degreeLevels(text: string): DegreeLevel[] {
+  const levels = new Set<DegreeLevel>();
+  if (/\b(?:undergraduate|bachelor(?:'s|s)?|baccalaureate)\b|(?:^|[^a-z])b\.?\s*[sa]\.?\s+(?:in\b|degree\b|program\b)/i.test(text)) levels.add("bachelor");
+  // Standalone "MA" is commonly a transcript course prefix or a state
+  // abbreviation. Only accept degree abbreviations when degree context
+  // follows, while full "master's"/MBA labels remain unambiguous.
+  if (/\b(?:graduate degree|mba|master(?:'s|s)?)\b|(?:^|[^a-z])m\.?\s*[sa]\.?\s+(?:in\b|degree\b|program\b)/i.test(text)) levels.add("master");
+  if (/\b(?:doctorate|doctoral)\b|(?:^|[^a-z])ph\.?\s*d\.?(?=$|[^a-z])/i.test(text)) levels.add("doctorate");
+  return Array.from(levels);
+}
+
+function degreeLevelFit(requirement: ParsedRequirement, background: string): RequirementFit | null {
+  if (requirement.category !== "education" || requirement.priority !== "minimum") return null;
+  const required = degreeLevels(requirement.text);
+  if (!required.length) return null;
+
+  // Resume parsers commonly split the school, dates, and degree across
+  // adjacent lines, so requiring enrollment wording on the same line would
+  // miss ordinary entries such as a standalone "B.S. in Computer Science".
+  const educationLines = background.split(/\n+/).map(line => line.trim()).filter(line => degreeLevels(line).length > 0);
+  const applicant = Array.from(new Set(educationLines.flatMap(degreeLevels)));
+  if (!applicant.length) return null;
+  const overlap = required.filter(level => applicant.includes(level));
+  const label = (levels: DegreeLevel[]) => levels.map(level => level === "bachelor" ? "bachelor’s" : level === "master" ? "master’s" : "doctoral").join(" or ");
+
+  if (overlap.length) {
+    return {
+      requirement: requirement.text,
+      priority: requirement.priority,
+      category: requirement.category,
+      status: "supported",
+      evidence: educationLines.slice(0, 2),
+      explanation: `Your current ${label(overlap)} program matches the degree level stated by the role.`,
+    };
+  }
+  return {
+    requirement: requirement.text,
+    priority: requirement.priority,
+    category: requirement.category,
+    status: "conflicting",
+    evidence: educationLines.slice(0, 2),
+    explanation: `The role explicitly requires current enrollment at the ${label(required)} level, while your supplied education shows a ${label(applicant)} program.`,
+  };
+}
+
 function degreeDisciplineConflict(requirement: ParsedRequirement, background: string): RequirementFit | null {
   if (requirement.category !== "education" || requirement.priority !== "minimum") return null;
   const required = DEGREE_DISCIPLINES.filter(item => requirement.text.toLowerCase().includes(item));
@@ -243,6 +307,8 @@ function degreeDisciplineConflict(requirement: ParsedRequirement, background: st
 function deterministicRequirementFit(requirement: ParsedRequirement, background: string, facts: ApplicantFacts, job: Pick<DiscoveryJob, "id" | "title">): RequirementFit {
   const graduation = graduationFit(requirement, facts, job.title);
   if (graduation) return graduation;
+  const levelFit = degreeLevelFit(requirement, background);
+  if (levelFit) return levelFit;
   const disciplineConflict = degreeDisciplineConflict(requirement, background);
   if (disciplineConflict) return disciplineConflict;
 
@@ -361,13 +427,16 @@ function summarizeRequirements(requirements: RequirementFit[]) {
   };
   // Preferred qualifications can strengthen a fit, but their absence should
   // not make an otherwise eligible internship look unsuitable.
-  const preferredEvidence = requirements.filter(requirement => requirement.priority === "preferred")
+  const preferred = requirements.filter(requirement => requirement.priority === "preferred");
+  const preferredEvidence = preferred
     .reduce((total, requirement) => total + (requirement.status === "supported" ? 1 : requirement.status === "partially_supported" ? 0.5 : 0), 0);
+  const preferredBonus = preferred.length ? (preferredEvidence / preferred.length) * 15 : 15;
   const minimumWeight = minimums.reduce((total, requirement) => total + weight(requirement), 0);
   let score = minimumWeight
-    ? Math.round((minimums.reduce((total, requirement) => total + value(requirement) * weight(requirement), 0) / minimumWeight) * 85 + Math.min(15, preferredEvidence * 5))
+    ? Math.round((minimums.reduce((total, requirement) => total + value(requirement) * weight(requirement), 0) / minimumWeight) * 85 + preferredBonus)
     : null;
   if (score !== null && hardConflicts.length) score = 0;
+  if (score !== null && requirements.some(requirement => requirement.priority === "minimum" && requirement.status === "needs_confirmation")) score = Math.min(score, 90);
   // A tiny extracted requirement set cannot justify a near-certain score even
   // when every extracted item has evidence. Keep the result explicitly
   // provisional until the parser has broader coverage of the posting.
@@ -636,7 +705,7 @@ function validateAnalysis(result: JobFitAnalysis, background: string, job: Disco
   }
 
   const enforcedRequirements = sourceRequirements
-    .filter(item => item.category === "education" || item.category === "graduation_window" || SENSITIVE_CATEGORIES.has(item.category) || /return(?:ing)? to (?:school|university|college)|continue academic studies|currently enrolled/i.test(item.text))
+    .filter(item => item.category === "education" || item.category === "graduation_window" || item.category === "location" || SENSITIVE_CATEGORIES.has(item.category) || /return(?:ing)? to (?:school|university|college)|continue academic studies|currently enrolled/i.test(item.text))
     .map(item => deterministicRequirementFit(item, background, facts, job));
 
   for (const enforced of enforcedRequirements) {
@@ -655,19 +724,28 @@ function validateAnalysis(result: JobFitAnalysis, background: string, job: Disco
       : canonical.band === "potential"
         ? { priority: "medium" as const, verdict: "consider" as const, label: "Medium priority — consider applying", rationale: "There is meaningful overlap, but the remaining gaps should be reviewed before investing heavily in tailoring." }
         : { priority: "low" as const, verdict: "consider" as const, label: "More information needed", rationale: "Resolve the open eligibility questions and evidence gaps before deciding how much application time to invest." };
-  const unsupportedConflictNarrative = eligibility.status !== "conflict" && /\b(?:conflict|ineligible|not eligible)\b/i.test(`${result.fitSummary} ${result.recommendation.label} ${result.recommendation.rationale}`);
-  const supportedCount = requirements.filter(item => item.status === "supported" || item.status === "partially_supported").length;
-  const evidenceGapCount = requirements.filter(item => item.status === "not_evidenced").length;
   const canonicalFitSummary = eligibility.status === "conflict"
     ? `This role is low priority: ${eligibility.reasons.join(" ")} Transferable skills can help with preferred qualifications, but they do not replace an explicit minimum requirement.`
-    : `No explicit eligibility conflict was found. Your supplied background supports ${supportedCount} of ${requirements.length} extracted requirements${evidenceGapCount ? `, while ${evidenceGapCount} are not yet evidenced in your profile` : ""}.`;
+    : (() => {
+      const minimum = requirements.filter(item => item.priority === "minimum");
+      const confirmedMinimum = minimum.filter(item => item.status === "supported" || item.status === "partially_supported").length;
+      const openMinimum = minimum.filter(item => item.status === "needs_confirmation").length;
+      const preferred = requirements.filter(item => item.priority === "preferred");
+      const supportedPreferred = preferred.filter(item => item.status === "supported" || item.status === "partially_supported").length;
+      const preferredGaps = preferred.filter(item => item.status === "not_evidenced").slice(0, 2).map(item => item.requirement);
+      return [
+        `Your supplied background supports ${confirmedMinimum} of ${minimum.length} minimum qualifications${openMinimum ? `; ${openMinimum} eligibility item${openMinimum === 1 ? " still needs" : "s still need"} confirmation` : ""}.`,
+        preferred.length ? `It also supports ${supportedPreferred} of ${preferred.length} preferred qualifications.` : "",
+        preferredGaps.length ? `The clearest remaining evidence gaps are ${preferredGaps.join(" and ")}.` : "",
+      ].filter(Boolean).join(" ");
+    })();
   return {
     ...result,
     score: canonical.score,
     band: canonical.band,
     label: bandLabel(canonical.band),
     recommendation,
-    fitSummary: eligibility.status === "conflict" || unsupportedConflictNarrative ? canonicalFitSummary : result.fitSummary,
+    fitSummary: canonicalFitSummary,
     gaps: result.gaps.filter(gap => graduationConflict || !/graduat/i.test(gap.title)),
     coachingActions: result.coachingActions.filter(action => graduationConflict || !/graduat|ineligib|eligibility conflict/i.test(action)),
     requirements,
@@ -720,6 +798,7 @@ Rules:
 - Cite only exact, short quotes copied from APPLICANT BACKGROUND. Never invent, paraphrase, or upgrade evidence.
 - "Not evidenced" means the documents do not show it; it does not mean the applicant lacks it.
 - Use "needs_confirmation" for work authorization, sponsorship, availability, relocation, or anything the supplied background cannot establish. Lines beginning APPLIHERO_CONFIRMED are explicit dated answers from the user and may be used as facts.
+- A preference that includes remote roles does not mean the applicant refuses hybrid or onsite work. Treat workplace format as conflicting only when an explicit current answer says the applicant cannot or will not satisfy the required format.
 - Use "conflicting" only when an explicit applicant fact directly contradicts an explicit minimum requirement.
 - Graduation dates and other eligibility facts are hard constraints. Never treat unrelated skills as compensation for an explicit eligibility conflict.
 - A new-graduate role conflicts with an applicant who explicitly graduates in a later year unless the posting states that later year is eligible.

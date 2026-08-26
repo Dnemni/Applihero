@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncDueSources } from "@/lib/discovery/sync";
 import { sendDueDiscoveryDigests } from "@/lib/discovery/digests";
+import { processDiscoveryEnrichment } from "@/lib/discovery/enrichment";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,8 +17,9 @@ export async function GET(request: NextRequest) {
   }
   try {
     const results = await syncDueSources({ limit: SCHEDULED_SOURCE_LIMIT });
+    const enrichment = await processDiscoveryEnrichment(24);
     const digests = await sendDueDiscoveryDigests();
-    return NextResponse.json({ scanned: results.length, results, digests });
+    return NextResponse.json({ scanned: results.length, results, enrichment, digests });
   } catch (error) {
     console.error("Scheduled discovery scan failed:", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Scan failed" }, { status: 500 });

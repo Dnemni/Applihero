@@ -24,7 +24,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // Preserve a completed semantic analysis while its inputs are current.
     // Resume edits, posting edits, or expired answers change a hash and trigger
     // an immediate deterministic refresh until the next detailed analysis.
-    const quickFit = analysisIsCurrent ? stored : buildQuickFit(recommendation.job, background);
+    const quickFit = analysisIsCurrent ? stored : {
+      ...buildQuickFit(recommendation.job, background),
+      matcherVersion: MATCHER_VERSION,
+      evaluatedProfileHash: profileHash,
+      evaluatedJobHash: recommendation.job.content_hash,
+    };
     if (JSON.stringify(quickFit) !== JSON.stringify(recommendation.quickFit)) await saveRecommendationFit(user.id, params.id, quickFit);
     const analysis = analysisIsCurrent ? await getCachedMatch({
       userId: user.id,

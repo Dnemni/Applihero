@@ -5,7 +5,7 @@ import type {
   RequirementPriority,
 } from "./types";
 
-export const REQUIREMENTS_PARSER_VERSION = "requirements-v9";
+export const REQUIREMENTS_PARSER_VERSION = "requirements-v14";
 
 const SKILL_ALIASES: Record<string, string[]> = {
   javascript: ["javascript", "js", "ecmascript"],
@@ -105,20 +105,20 @@ export function parseJobRequirements(description: string): ParsedRequirement[] {
   let section: Section = "unknown";
 
   const headingPatterns: Array<{ pattern: RegExp; section: Section }> = [
-    { pattern: /^(?:preferred|bonus|nice[- ]to[- ]have|desired|what we value|our values)(?: qualifications?| skills?)?/i, section: "preferred" },
-    { pattern: /^(?:minimum|required|basic)?\s*(?:qualifications?|requirements?|what you(?:'|’)ll need|what you bring|who you are|you are|about you|your background|skills and experience)/i, section: "requirements" },
-    { pattern: /^(?:responsibilities|what you(?:'|’)ll do|what you will do|the role|about the role|day to day|your impact|during your (?:internship|placement).{0,35}(?:opportunities|you may))/i, section: "responsibilities" },
+    { pattern: /^(?:preferred|bonus|nice[- ]to[- ]have|desired)(?: qualifications?| skills?)?/i, section: "preferred" },
+    { pattern: /^(?:minimum|required|basic)?\s*(?:qualifications?|requirements?|what you(?:'|’)ll need|what you bring|what we need(?: to see)?|what we value|who you are|who we are looking for|you are|about you|your background|skills and experience)/i, section: "requirements" },
+    { pattern: /^(?:responsibilities|what you(?:'|’)ll do|what you(?:'|’)ll be doing|what you will do|what you will be doing|the role|about the role|day to day|your impact|during your (?:internship|placement).{0,35}(?:opportunities|you may))/i, section: "responsibilities" },
     { pattern: /^(?:about (?:us|the company|offerup)|company|why join|benefits|perks|compensation|salary|pay range|equal opportunity|eeo|privacy|accommodation|additional information)/i, section: "ignore" },
   ];
 
-  const boilerplate = /\b(?:equal employment|equal opportunity|affirmative action|nondiscrimination|non-discrimination|prohibits discrimination|protected veteran|applicable (?:state|federal|local) laws?|benefits[- ]eligible|compensation|hourly rate|pay range|salary range|base pay|base salary|additional compensation|on target earnings|sales commissions?|sales bonuses?|reasonable accommodations?|background check|privacy policy|redact (?:age|date)|date of birth|practice assessments?|interview guides?|invite you to sign up|showcase your very best|top (?:shopping|marketplace) apps?)\b/i;
+  const boilerplate = /\b(?:equal employment|equal opportunity|affirmative action|nondiscrimination|non-discrimination|do not discriminate|prohibits discrimination|diverse work environment|protected veteran|applicable (?:state|federal|local) laws?|benefits[- ]eligible|benefits offered|compensation|hourly rate|pay range|salary range|base pay|base salary|additional compensation|on target earnings|sales commissions?|sales bonuses?|reasonable accommodations?|background check|privacy policy|responsible ai policy|unsolicited resumes?|headhunters?|recruitment agencies|existing vacancy|redact (?:age|date)|date of birth|practice assessments?|interview guides?|invite you to sign up|showcase your very best|top (?:shopping|marketplace) apps?|by submitting your application|indicating your interest|recruiting for multiple positions|a recruiter will contact you)\b/i;
   const nonRequirement = /\b(?:employee benefits?|benefits include|competitive salary|equity|401\s*\(?k\)?|health(?:,? dental| insurance)?|vision(?: insurance)?|life insurance|short[- ]term disability|long[- ]term disability|paid parental|caregiver leave|flexible time off|commuter benefits?|wellness stipend|set[- ]?up reimbursement|office amenities|team gatherings|want to learn more|learn more about our benefits|interviewing \+ culture|operating principles|reasons not to work)\b/i;
 
   for (const rawLine of description.replace(/\r/g, "").split(/\n/)) {
     const cleanedLine = normalizeWhitespace(rawLine.replace(/^[•*\-–—\d.)\s]+/, ""));
     if (!cleanedLine) continue;
 
-    if (/^(?:compensation|benefits|perks|equal opportunity|eeo|privacy|accommodation)\s*:/i.test(cleanedLine)) {
+    if (/^(?:compensation|benefits|benefits offered|perks|equal opportunity|eeo|privacy|accommodation)(?:\s*:|\b)/i.test(cleanedLine)) {
       section = "ignore";
       continue;
     }
@@ -142,6 +142,16 @@ export function parseJobRequirements(description: string): ParsedRequirement[] {
     if (/^currently pursuing\b/i.test(cleanedLine)) {
       section = "requirements";
       sectionPriority = "minimum";
+    }
+    if (/^job details\s*:?$/i.test(cleanedLine)) {
+      section = "unknown";
+      continue;
+    }
+    if (/^(?:locations?|duration|summer internship|spring[- ]summer co-op|summer[- ]fall co-op|semester schools?|quarter schools?)\s*:?/i.test(cleanedLine)) continue;
+    if (/^if you have (?:knowledge|experience|knowledge\s*\/\s*experience).{0,180}(?:encourage you to apply|enthusiastic about this role)/i.test(cleanedLine)) {
+      section = "preferred";
+      sectionPriority = "preferred";
+      continue;
     }
     if (/^bring your curiosity\b/i.test(cleanedLine)) {
       section = "preferred";
@@ -170,12 +180,21 @@ export function parseJobRequirements(description: string): ParsedRequirement[] {
   }
 
   const sectionRequirements = lines.filter(line => line.section === "requirements" || line.section === "preferred");
-  const fallbackCandidates = lines.filter(line => line.section !== "ignore" && line.section !== "responsibilities" && REQUIREMENT_HINT.test(line.text));
+  const eligibilityRequirements = lines.filter(line => {
+    if (line.section === "ignore" || line.section === "responsibilities") return false;
+    const category = categorizeRequirement(line.text);
+    return ["work_authorization", "graduation_window", "location", "availability"].includes(category) &&
+      /\b(?:must|required|requires?|not eligible|authorized|sponsor|full[- ]time|\d+\s*hours?|onsite|on-site|hybrid|available)\b/i.test(line.text);
+  });
+  const fallbackCandidates = lines.filter(line =>
+    line.section !== "ignore" &&
+    line.section !== "responsibilities" &&
+    REQUIREMENT_HINT.test(line.text) &&
+    !/^(?:you(?:'|’)ll|you will|in this role|the role|we (?:will|are seeking|help|train|assign|encourage)|join us|come join|our (?:team|company|mission|platform))/i.test(line.text)
+  );
   const source = sectionRequirements.length > 0
-    ? sectionRequirements
-    : fallbackCandidates.length >= 2
-      ? fallbackCandidates
-      : lines.filter(line => line.section !== "ignore" && extractNormalizedTerms(line.text).length > 0);
+    ? [...eligibilityRequirements, ...sectionRequirements]
+    : fallbackCandidates;
   const seen = new Set<string>();
 
   return source
@@ -188,12 +207,14 @@ export function parseJobRequirements(description: string): ParsedRequirement[] {
     .slice(0, 24)
     .map((line, index) => {
       const category = categorizeRequirement(line.text);
+      const explicitEligibility = ["work_authorization", "graduation_window", "location", "availability"].includes(category) &&
+        /\b(?:must|required|requires?|not eligible|authorized|sponsor|full[- ]time|\d+\s*hours?|onsite|on-site|hybrid|available)\b/i.test(line.text);
       return {
         id: requirementId(line.text, index),
         text: line.text,
         sourceQuote: line.text,
         category,
-        priority: PREFERRED_HINT.test(line.text) ? getPriority(line.text) : line.sectionPriority,
+        priority: explicitEligibility ? "minimum" : PREFERRED_HINT.test(line.text) ? getPriority(line.text) : line.sectionPriority,
         normalizedTerms: extractNormalizedTerms(line.text),
         needsUserConfirmation: category === "work_authorization" || category === "availability" || category === "location",
         confidence: category === "other" ? 0.65 : 0.85,

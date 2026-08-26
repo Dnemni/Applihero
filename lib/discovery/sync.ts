@@ -1,7 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase/client";
-import { fetchSourceJobs, hydrateSourceJob, prepareSourceJob, type NormalizedSourceJob } from "./connectors";
+import { fetchSourceJobsWithMeta, hydrateSourceJob, prepareSourceJob, type NormalizedSourceJob, type SourceScanMode } from "./connectors";
 import { assessDiscoveryEligibility, getDiscoveryApplicantProfile } from "./eligibility";
-import { buildQuickFit } from "./matcher";
+import { applyDiscoveryEligibilityGate, buildQuickFit, MATCHER_VERSION } from "./matcher";
+import { hashText } from "./parser";
 import { answersToMatchingContext, type DiscoveryAnswer } from "./facts";
 import type { DiscoveryJob, QuickFit } from "./types";
 
@@ -9,6 +10,7 @@ const MAX_RECOMMENDATIONS_PER_SOURCE = 30;
 const MIN_RECOMMENDATION_SCORE = 10;
 const MAX_SOURCE_CATALOG_JOBS = 100;
 const MAX_CANDIDATES_PER_USER = MAX_SOURCE_CATALOG_JOBS;
+const MAX_INLINE_DETAIL_HYDRATIONS = 12;
 
 const db = () => {
   if (!supabaseAdmin) throw new Error("Supabase admin client is not configured");
@@ -65,19 +67,23 @@ function asDiscoveryJob(job: NormalizedSourceJob, source: any): DiscoveryJob {
 }
 
 async function upsertInChunks(table: string, rows: any[], options: Record<string, unknown>) {
-  for (let index = 0; index < rows.length; index += 100) {
-    const { error } = await db().from(table).upsert(rows.slice(index, index + 100), options);
+  // Discovery job rows can contain large descriptions and raw provider
+  // payloads. Small transactions avoid Supabase statement timeouts while the
+  // unique constraints keep retries idempotent.
+  const chunkSize = table === "discovery_jobs" ? 20 : 50;
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    const { error } = await db().from(table).upsert(rows.slice(index, index + chunkSize), options);
     if (error) throw error;
   }
 }
 
-async function upsertChangedDiscoveryJobs(sourceId: string, rows: any[]) {
+async function upsertChangedDiscoveryJobs(sourceId: string, rows: any[], ingestionState = false) {
   if (!rows.length) return;
-  const existingByKey = new Map<string, { content_hash: string | null; status: string | null }>();
+  const existingByKey = new Map<string, { content_hash: string | null; listing_hash?: string | null; status: string | null }>();
   for (let index = 0; index < rows.length; index += 100) {
     const sourceJobIds = rows.slice(index, index + 100).map(row => row.source_job_id);
     const { data, error } = await db().from("discovery_jobs")
-      .select("source_job_id,content_hash,status")
+      .select(ingestionState ? "source_job_id,content_hash,listing_hash,status" : "source_job_id,content_hash,status")
       .eq("source_id", sourceId)
       .in("source_job_id", sourceJobIds);
     if (error) throw error;
@@ -88,9 +94,36 @@ async function upsertChangedDiscoveryJobs(sourceId: string, rows: any[]) {
   // redundant write when a still-live posting has not changed.
   const changed = rows.filter(row => {
     const existing = existingByKey.get(row.source_job_id);
-    return !existing || existing.content_hash !== row.content_hash || existing.status !== "open";
+    return !existing || existing.content_hash !== row.content_hash ||
+      (ingestionState && existing.listing_hash !== row.listing_hash) || existing.status !== "open";
   });
   await upsertInChunks("discovery_jobs", changed, { onConflict: "source_id,source_job_id" });
+}
+
+function sourceSupportsIngestionState(source: any) {
+  return Object.prototype.hasOwnProperty.call(source, "scan_state");
+}
+
+function asCachedSourceJob(rawJob: NormalizedSourceJob, existing: any): NormalizedSourceJob {
+  // Full-feed providers such as Jibe already return the canonical posting
+  // body. Prefer that fresh body so corrections and edits from the employer
+  // are reflected immediately. The cache is only for list-only providers
+  // whose feed row still needs a previously hydrated detail page.
+  if (rawJob.description?.trim() || !existing?.description) return rawJob;
+  return {
+    ...rawJob,
+    description: existing.description,
+    description_html: existing.description_html,
+    workplace_type: rawJob.workplace_type || existing.workplace_type,
+    employment_type: rawJob.employment_type || existing.employment_type,
+    // Re-run only the deterministic local parser. This is cheap and ensures a
+    // provider-side title/location change produces a matching content hash
+    // without refetching the remote detail page.
+    parsed_requirements: [],
+    parser_version: existing.parser_version,
+    content_hash: existing.content_hash,
+    raw_payload: rawJob.raw_payload || existing.raw_payload,
+  };
 }
 
 async function createInAppAlerts(subscription: Subscription, newRecommendations: Array<{ jobId: string; quickFit: QuickFit; job: any }>) {
@@ -134,8 +167,22 @@ export async function syncSource(source: any): Promise<SyncResult> {
   const database = db();
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
+  const ingestionState = sourceSupportsIngestionState(source);
+  const scanLockToken = ingestionState ? crypto.randomUUID() : null;
   await database.from("job_sources").update({ last_sync_started_at: startedAt }).eq("id", source.id);
   try {
+    if (scanLockToken) {
+      const { data: locked, error: lockError } = await database.from("job_sources").update({
+        scan_lock_token: scanLockToken,
+        scan_locked_until: new Date(Date.now() + 8 * 60_000).toISOString(),
+      }).eq("id", source.id)
+        .or(`scan_locked_until.is.null,scan_locked_until.lt.${startedAt}`)
+        .select("id").maybeSingle();
+      if (lockError) throw lockError;
+      if (!locked) {
+        return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started, error: "Source scan is already running" };
+      }
+    }
     const { data: subscriptions, error: subscriptionError } = await database
       .from("user_job_source_subscriptions")
       .select("user_id, subscribed_at, min_fit_score, profiles(resume_text, transcript_text, bio)")
@@ -144,7 +191,12 @@ export async function syncSource(source: any): Promise<SyncResult> {
     if (subscriptionError) throw subscriptionError;
     if (!subscriptions?.length) {
       const now = new Date().toISOString();
-      await database.from("job_sources").update({ last_sync_completed_at: now, last_sync_error: null, next_sync_at: new Date(Date.now() + 15 * 60_000).toISOString() }).eq("id", source.id);
+      await database.from("job_sources").update({
+        last_sync_completed_at: now,
+        last_sync_error: null,
+        next_sync_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+        ...(scanLockToken ? { scan_lock_token: null, scan_locked_until: null } : {}),
+      }).eq("id", source.id);
       return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started };
     }
 
@@ -167,7 +219,7 @@ export async function syncSource(source: any): Promise<SyncResult> {
         profile?.bio,
         answersToMatchingContext(answersByUser.get(subscription.user_id) || []),
       ].filter(Boolean).join("\n\n");
-      return { subscription, background, discovery: getDiscoveryApplicantProfile(background) };
+      return { subscription, background, profileHash: hashText(background), discovery: getDiscoveryApplicantProfile(background) };
     });
     const allStudents = subscriberProfiles.every(item => item.discovery.isStudent);
     const sourceForFetch = source.provider === "ibm" && allStudents
@@ -177,7 +229,22 @@ export async function syncSource(source: any): Promise<SyncResult> {
       : source.provider === "amazon" && allStudents
         ? { ...source, config: { ...(source.config || {}), searchQueries: ["intern", "co-op", "student"], maxJobs: 500 } }
       : source;
-    const fetched = await fetchSourceJobs(sourceForFetch);
+    const { data: existingSourceJobs, error: existingSourceError } = await database.from("discovery_jobs")
+      .select("*").eq("source_id", source.id).order("discovered_at", { ascending: false }).limit(2_000);
+    if (existingSourceError) throw existingSourceError;
+    const existingBySourceJob = new Map<string, any>((existingSourceJobs || []).map((job: any) => [String(job.source_job_id), job]));
+    const knownJobIds = new Set<string>(existingBySourceJob.keys());
+    const lastFullScanAt = ingestionState ? source.last_full_scan_at : source.last_sync_completed_at;
+    const dueReconcile = !lastFullScanAt || Date.now() - new Date(lastFullScanAt).getTime() >= 24 * 60 * 60_000;
+    const scanMode: SourceScanMode = !knownJobIds.size ? "bootstrap" : dueReconcile ? "reconcile" : "incremental";
+    const scan = await fetchSourceJobsWithMeta(sourceForFetch, {
+      mode: scanMode,
+      knownJobIds,
+      scanState: ingestionState ? source.scan_state : {},
+      lastFullScanAt,
+      maxJobs: MAX_SOURCE_CATALOG_JOBS,
+    });
+    const fetched = scan.jobs;
     const includeTitleTerms = Array.isArray(source.config?.includeTitleTerms)
       ? source.config.includeTitleTerms.map((term: unknown) => String(term).toLowerCase().trim()).filter(Boolean) : [];
     const titleFiltered = includeTitleTerms.length
@@ -190,26 +257,44 @@ export async function syncSource(source: any): Promise<SyncResult> {
       .sort((a, b) => new Date(b.source_published_at || 0).getTime() - new Date(a.source_published_at || 0).getTime())
       .slice(0, MAX_SOURCE_CATALOG_JOBS);
 
+    const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters";
+    const cachedSourceJobs = newestSourceJobs.map(job => asCachedSourceJob(job, existingBySourceJob.get(job.source_job_id)));
     const candidatesByUser = new Map<string, NormalizedSourceJob[]>();
-    const candidatesToHydrate = new Map<string, NormalizedSourceJob>(newestSourceJobs.map(job => [job.source_job_id, job]));
+    const candidatesToHydrate = new Map<string, NormalizedSourceJob>();
     for (const item of subscriberProfiles) {
-      const candidates = newestSourceJobs
-        .filter(rawJob => assessDiscoveryEligibility(rawJob, item.discovery).eligible)
-        .slice(0, MAX_CANDIDATES_PER_USER);
+      const candidates = cachedSourceJobs.slice(0, MAX_CANDIDATES_PER_USER);
       candidatesByUser.set(item.subscription.user_id, candidates);
-      candidates.forEach(job => candidatesToHydrate.set(job.source_job_id, job));
+      if (detailProvider) {
+        for (const job of candidates) {
+          if (!job.description && candidatesToHydrate.size < MAX_INLINE_DETAIL_HYDRATIONS) {
+            candidatesToHydrate.set(job.source_job_id, job);
+          }
+        }
+      }
+    }
+    // Prioritize jobs that can actually enter a subscriber's feed. Once those
+    // details are covered, use any remaining inline budget to enrich the
+    // general company catalog.
+    if (detailProvider) {
+      for (const job of cachedSourceJobs) {
+        if (!job.description && candidatesToHydrate.size < MAX_INLINE_DETAIL_HYDRATIONS) {
+          candidatesToHydrate.set(job.source_job_id, job);
+        }
+      }
     }
 
     const hydratedByKey = new Map<string, NormalizedSourceJob>();
     const hydrationCandidates = Array.from(candidatesToHydrate.values());
-    const hydrationBatchSize = sourceForFetch.provider === "workday" ? 3 : 8;
+    const hydrationBatchSize = sourceForFetch.provider === "workday" || sourceForFetch.provider === "eightfold" ? 3 : 8;
     for (let index = 0; index < hydrationCandidates.length; index += hydrationBatchSize) {
-      const hydrated = await Promise.all(hydrationCandidates.slice(index, index + hydrationBatchSize).map(job => hydrateSourceJob(sourceForFetch, job)));
-      hydrated.forEach(job => hydratedByKey.set(job.source_job_id, prepareSourceJob(job)));
+      const hydrated = await Promise.allSettled(hydrationCandidates.slice(index, index + hydrationBatchSize).map(job => hydrateSourceJob(sourceForFetch, job)));
+      hydrated.forEach(result => {
+        if (result.status === "fulfilled") hydratedByKey.set(result.value.source_job_id, prepareSourceJob(result.value));
+      });
     }
 
     const sourceCatalog = new Map<string, NormalizedSourceJob>();
-    for (const rawJob of newestSourceJobs) {
+    for (const rawJob of cachedSourceJobs) {
       const hydrated = hydratedByKey.get(rawJob.source_job_id) || prepareSourceJob(rawJob);
       sourceCatalog.set(hydrated.source_job_id, hydrated);
     }
@@ -220,15 +305,23 @@ export async function syncSource(source: any): Promise<SyncResult> {
       const evaluated: EvaluatedJob[] = [];
       for (const rawJob of candidatesByUser.get(item.subscription.user_id) || []) {
         const job = hydratedByKey.get(rawJob.source_job_id) || prepareSourceJob(rawJob);
-        const quickFit = buildQuickFit(asDiscoveryJob(job, source), item.background);
+        if (!job.description.trim()) continue;
+        const gate = assessDiscoveryEligibility(job, item.discovery);
+        const quickFit = applyDiscoveryEligibilityGate({
+          ...buildQuickFit(asDiscoveryJob(job, source), item.background),
+          matcherVersion: MATCHER_VERSION,
+          evaluatedProfileHash: item.profileHash,
+          evaluatedJobHash: job.content_hash,
+        }, gate);
         evaluated.push({ job, quickFit });
       }
       const alertable = evaluated
-        .filter(item =>
-          item.quickFit.score !== null &&
-          item.quickFit.score >= MIN_RECOMMENDATION_SCORE &&
-          item.quickFit.band !== "likely_conflict" &&
-          item.quickFit.eligibility.status !== "conflict"
+        .filter(entry =>
+          entry.quickFit.discoveryEligible !== false &&
+          entry.quickFit.score !== null &&
+          entry.quickFit.score >= MIN_RECOMMENDATION_SCORE &&
+          entry.quickFit.band !== "likely_conflict" &&
+          entry.quickFit.eligibility.status !== "conflict"
         )
         .sort((a, b) => (b.quickFit.score ?? -1) - (a.quickFit.score ?? -1))
         .slice(0, MAX_RECOMMENDATIONS_PER_SOURCE);
@@ -241,25 +334,72 @@ export async function syncSource(source: any): Promise<SyncResult> {
     }
 
     const now = new Date().toISOString();
-    const persistedJobs = Array.from(sourceCatalog.values()).map(job => ({
-      ...job,
-      source_id: source.id,
-      company_name: source.company_name,
-      status: "open",
-      consecutive_misses: 0,
-      last_verified_at: now,
-    }));
-    await upsertChangedDiscoveryJobs(source.id, persistedJobs);
+    const persistedJobs = Array.from(sourceCatalog.values()).map(job => {
+      const { source_published_precision, source_published_source, listing_hash, ...baseJob } = job;
+      return {
+        ...baseJob,
+        source_id: source.id,
+        company_name: source.company_name,
+        status: "open",
+        consecutive_misses: 0,
+        last_verified_at: now,
+        ...(ingestionState ? {
+          last_seen_at: now,
+          source_published_precision: source_published_precision || "unknown",
+          source_published_source: source_published_source || null,
+          listing_hash: listing_hash || null,
+          bootstrap_observed: Boolean(existingBySourceJob.get(job.source_job_id)?.bootstrap_observed) ||
+            (scan.meta.mode === "bootstrap" && !existingBySourceJob.has(job.source_job_id)),
+          enrichment_status: job.description ? "complete" : "pending",
+          enriched_at: job.description ? now : null,
+        } : {}),
+      };
+    });
+    await upsertChangedDiscoveryJobs(source.id, persistedJobs, ingestionState);
+    if (ingestionState) {
+      for (let index = 0; index < persistedJobs.length; index += 50) {
+        const { error: seenError } = await database.from("discovery_jobs").update({
+          last_seen_at: now,
+          last_verified_at: now,
+          consecutive_misses: 0,
+        }).eq("source_id", source.id)
+          .in("source_job_id", persistedJobs.slice(index, index + 50).map(job => job.source_job_id));
+        if (seenError) throw seenError;
+      }
+    }
     let storedJobs: any[] = [];
     if (sourceCatalog.size) {
-      const { data, error: storedError } = await database.from("discovery_jobs")
-        .select("id, source_job_id, title, company_name, location")
-        .eq("source_id", source.id)
-        .in("source_job_id", Array.from(sourceCatalog.keys()));
-      if (storedError) throw storedError;
-      storedJobs = data || [];
+      const sourceJobIds = Array.from(sourceCatalog.keys());
+      for (let index = 0; index < sourceJobIds.length; index += 50) {
+        const { data, error: storedError } = await database.from("discovery_jobs")
+          .select(ingestionState ? "id, source_job_id, title, company_name, location, first_seen_at, bootstrap_observed, enrichment_status" : "id, source_job_id, title, company_name, location")
+          .eq("source_id", source.id)
+          .in("source_job_id", sourceJobIds.slice(index, index + 50));
+        if (storedError) throw storedError;
+        storedJobs.push(...(data || []));
+      }
     }
     const storedByKey = new Map(storedJobs.map((job: any) => [job.source_job_id, job]));
+
+    let queuedEnrichmentCount = 0;
+    if (ingestionState) {
+      const queueRows = Array.from(sourceCatalog.values()).flatMap(job => {
+        const stored = storedByKey.get(job.source_job_id) as any;
+        return stored && !job.description ? [{
+          discovery_job_id: stored.id,
+          source_id: source.id,
+          status: "pending",
+          priority: existingBySourceJob.has(job.source_job_id) ? 100 : 20,
+          next_attempt_at: now,
+          updated_at: now,
+        }] : [];
+      });
+      if (queueRows.length) await upsertInChunks("discovery_enrichment_queue", queueRows, {
+        onConflict: "discovery_job_id",
+        ignoreDuplicates: true,
+      });
+      queuedEnrichmentCount = queueRows.length;
+    }
 
     let discovered = 0;
     for (const item of subscriberProfiles) {
@@ -284,11 +424,10 @@ export async function syncSource(source: any): Promise<SyncResult> {
           last_evaluated_at: now,
         }] : [];
       });
-      const activeIds = recommendationRows.map(row => row.discovery_job_id);
-      await database.from("user_job_recommendations").update({ active: false, last_evaluated_at: now })
-        .eq("user_id", item.subscription.user_id).eq("source_id", source.id)
-        .eq("active", true)
-        .not("discovery_job_id", "in", `(${activeIds.join(",") || "00000000-0000-0000-0000-000000000000"})`);
+      // Incremental provider scans intentionally inspect only a recent
+      // frontier. A job missing from that bounded window is not closed, so do
+      // not deactivate its recommendation here. Reconciliation updates the
+      // canonical discovery_jobs status; the feed filters closed rows there.
       const changedRecommendations = recommendationRows.filter(row => {
         const existing = existingByJobId.get(row.discovery_job_id) as any;
         return !existing ||
@@ -305,7 +444,11 @@ export async function syncSource(source: any): Promise<SyncResult> {
       // searches a company, but should never create a proactive alert.
       const newlyRecommended = evaluated.alertable.flatMap(entry => {
         const stored = storedByKey.get(entry.job.source_job_id) as any;
-        return stored && !existingIds.has(stored.id) ? [{ jobId: stored.id, quickFit: entry.quickFit, job: stored }] : [];
+        const isBaseline = ingestionState && stored?.bootstrap_observed;
+        const observedAfterSubscription = !ingestionState || !stored?.first_seen_at || new Date(stored.first_seen_at) >= new Date(item.subscription.subscribed_at);
+        return stored && !existingIds.has(stored.id) && !isBaseline && observedAfterSubscription
+          ? [{ jobId: stored.id, quickFit: entry.quickFit, job: stored }]
+          : [];
       });
       discovered += newlyRecommended.length;
       await createInAppAlerts(item.subscription, newlyRecommended);
@@ -317,7 +460,37 @@ export async function syncSource(source: any): Promise<SyncResult> {
       last_sync_error: null,
       consecutive_failures: 0,
       next_sync_at: new Date(Date.now() + interval * 60_000).toISOString(),
+      ...(ingestionState ? {
+        scan_state: scan.meta.state,
+        last_successful_scan_at: now,
+        last_full_scan_at: scan.meta.fullScan ? now : source.last_full_scan_at,
+        last_scan_mode: scan.meta.mode,
+        last_scan_strategy: scan.meta.strategy,
+        last_board_total: scan.meta.boardTotal,
+        scan_lock_token: null,
+        scan_locked_until: null,
+      } : {}),
     }).eq("id", source.id);
+    if (ingestionState) {
+      const { error: telemetryError } = await database.from("discovery_scan_runs").insert({
+        source_id: source.id,
+        started_at: startedAt,
+        finished_at: now,
+        mode: scan.meta.mode,
+        provider: source.provider,
+        status: "succeeded",
+        strategy: scan.meta.strategy,
+        board_total: scan.meta.boardTotal,
+        enumerated_count: scan.meta.enumeratedCount,
+        pages_fetched: scan.meta.pagesFetched,
+        new_job_count: Array.from(sourceCatalog.keys()).filter(id => !existingBySourceJob.has(id)).length,
+        changed_job_count: 0,
+        queued_enrichment_count: queuedEnrichmentCount,
+        duration_ms: Date.now() - started,
+        metadata: { warnings: scan.meta.warnings, authoritative: scan.meta.authoritative },
+      });
+      if (telemetryError) console.error("Unable to save discovery scan telemetry:", telemetryError);
+    }
     return {
       sourceId: source.id,
       company: source.company_name,
@@ -338,6 +511,7 @@ export async function syncSource(source: any): Promise<SyncResult> {
       last_sync_error: message,
       consecutive_failures: failures,
       next_sync_at: new Date(Date.now() + retryMinutes * 60_000).toISOString(),
+      ...(scanLockToken ? { scan_lock_token: null, scan_locked_until: null } : {}),
     }).eq("id", source.id);
     return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started, error: message };
   }

@@ -11,9 +11,14 @@
     "test:get-ids": "tsx scripts/get-test-ids.ts",
     "test:rag": "tsx scripts/rag-test.ts",
     "test:docs": "tsx scripts/check-job-documents.ts",
-    "test:profile": "tsx scripts/check-profile-data.ts"
+    "test:profile": "tsx scripts/check-profile-data.ts",
+    "test:discovery": "tsx --test lib/discovery/__tests__/*.test.ts",
+    "test:discovery-scale": "tsx scripts/audit-discovery-scale.ts",
+    "backfill:discovery-fit-cache": "tsx scripts/backfill-discovery-fit-cache.ts",
+    "backfill:discovery-parsing": "tsx scripts/backfill-discovery-parsing.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@react-oauth/google": "^0.13.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.86.0",

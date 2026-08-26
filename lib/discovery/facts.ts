@@ -130,6 +130,11 @@ export function answersToMatchingContext(answers: DiscoveryAnswer[]) {
   if (!freshAnswers.length) return "";
   return [
     "APPLIHERO CONFIRMED ELIGIBILITY FACTS (user supplied):",
-    ...freshAnswers.map(answer => `APPLIHERO_CONFIRMED key=${answer.question_key} value=${answer.normalized_value} provided=${answer.provided_at.slice(0, 10)}`),
+    ...freshAnswers.map(answer => {
+      const meaning = answer.question_key === "preference_remote"
+        ? answer.normalized_value === "yes" ? " meaning=include_remote_roles_not_remote_only" : " meaning=exclude_remote_roles"
+        : "";
+      return `APPLIHERO_CONFIRMED key=${answer.question_key} value=${answer.normalized_value}${meaning} provided=${answer.provided_at.slice(0, 10)}`;
+    }),
   ].join("\n");
 }

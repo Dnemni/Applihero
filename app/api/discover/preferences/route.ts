@@ -4,7 +4,11 @@ import { supabaseAdmin } from "@/lib/supabase/client";
 
 export const dynamic = "force-dynamic";
 const db = () => supabaseAdmin as any;
-const ALLOWED_FREQUENCIES = new Set([15, 60, 360, 1440, 10080]);
+// New catalog changes arrive on the hourly shared sweep, so presenting a
+// shorter digest interval would imply fresher results than we can truthfully
+// deliver. Existing 15-minute preferences continue to work at the next hourly
+// maintenance pass; newly saved choices start at one hour.
+const ALLOWED_FREQUENCIES = new Set([60, 360, 1440, 10080]);
 const LOCATION_KEYS = ["preference_country", "preference_regions", "preference_remote", "preference_location_scope"];
 
 function locationPreferences(rows: any[] = []) {
@@ -30,7 +34,8 @@ export async function GET(request: NextRequest) {
     ]);
     if (error && error.code !== "PGRST116") throw error;
     if (locationError) throw locationError;
-    return NextResponse.json({ preferences: { ...(data || { email_enabled: false, digest_frequency_minutes: 1440, minimum_fit_score: 45 }), ...locationPreferences(locations) } });
+    const base = data || { email_enabled: false, digest_frequency_minutes: 1440, minimum_fit_score: 45 };
+    return NextResponse.json({ preferences: { ...base, digest_frequency_minutes: Math.max(60, Number(base.digest_frequency_minutes || 1440)), ...locationPreferences(locations) } });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load notification settings" }, { status });

@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const recommendations = resultPage.items.map(item => {
       const stored = item.quickFit;
       const fitIsCurrent =
-        stored.matcherVersion === MATCHER_VERSION &&
+        stored?.matcherVersion === MATCHER_VERSION &&
         stored.evaluatedProfileHash === profileHash &&
         stored.evaluatedJobHash === item.job.content_hash &&
         typeof stored.discoveryEligible === "boolean";
@@ -66,6 +66,11 @@ export async function GET(request: NextRequest) {
       strongResults: resultPage.strong,
       hasBackground,
       hasSubscriptions,
+    }, {
+      // A brief browser-only cache window prevents repeated identical list
+      // reads during navigation. The shared source catalog is refreshed in
+      // the background, and `private` keeps this authenticated payload local.
+      headers: { "Cache-Control": "private, max-age=20, stale-while-revalidate=60" },
     });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;

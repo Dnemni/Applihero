@@ -180,7 +180,12 @@ async function createInAppAlerts(subscription: Subscription, newRecommendations:
   if (linkedError) throw linkedError;
 }
 
-export async function syncSource(source: any): Promise<SyncResult> {
+/**
+ * Scan the shared employer catalog. `catalogOnly` is used by the scheduled
+ * catalog sweep: jobs still get persisted and deduplicated even when nobody
+ * follows the source yet. User matching and notifications remain opt-in.
+ */
+export async function syncSource(source: any, options: { catalogOnly?: boolean } = {}): Promise<SyncResult> {
   const database = db();
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
@@ -206,21 +211,25 @@ export async function syncSource(source: any): Promise<SyncResult> {
       .eq("source_id", source.id)
       .eq("enabled", true);
     if (subscriptionError) throw subscriptionError;
-    if (!subscriptions?.length) {
+    if (!subscriptions?.length && !options.catalogOnly) {
       const now = new Date().toISOString();
       await database.from("job_sources").update({
         last_sync_completed_at: now,
         last_sync_error: null,
-        next_sync_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+        next_sync_at: new Date(Date.now() + 60 * 60_000).toISOString(),
         ...(scanLockToken ? { scan_lock_token: null, scan_locked_until: null } : {}),
       }).eq("id", source.id);
       return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started };
     }
 
-    const subscriberIds = (subscriptions as Subscription[]).map(subscription => subscription.user_id);
-    const { data: answerRows, error: answerError } = await database.from("user_discovery_answers")
-      .select("*").in("user_id", subscriberIds).eq("reuse_approved", true);
-    if (answerError && answerError.code !== "42P01" && answerError.code !== "PGRST205") throw answerError;
+    const subscriberIds = (subscriptions as Subscription[] || []).map(subscription => subscription.user_id);
+    let answerRows: any[] = [];
+    if (subscriberIds.length) {
+      const { data, error: answerError } = await database.from("user_discovery_answers")
+        .select("*").in("user_id", subscriberIds).eq("reuse_approved", true);
+      if (answerError && answerError.code !== "42P01" && answerError.code !== "PGRST205") throw answerError;
+      answerRows = data || [];
+    }
     const answersByUser = new Map<string, DiscoveryAnswer[]>();
     for (const answer of answerRows || []) {
       const current = answersByUser.get(answer.user_id) || [];
@@ -238,7 +247,7 @@ export async function syncSource(source: any): Promise<SyncResult> {
       ].filter(Boolean).join("\n\n");
       return { subscription, background, profileHash: hashText(background), discovery: getDiscoveryApplicantProfile(background) };
     });
-    const allStudents = subscriberProfiles.every(item => item.discovery.isStudent);
+    const allStudents = subscriberProfiles.length > 0 && subscriberProfiles.every(item => item.discovery.isStudent);
     const sourceForFetch = source.provider === "ibm" && allStudents
       ? { ...source, config: { ...(source.config || {}), searchQueries: ["internship", "co-op"], maxJobs: 500 } }
       : source.provider === "oracle" && allStudents
@@ -276,10 +285,25 @@ export async function syncSource(source: any): Promise<SyncResult> {
 
     const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters" || sourceForFetch.provider === "avature" || sourceForFetch.provider === "indexed_site" || sourceForFetch.provider === "career_site";
     const cachedSourceJobs = newestSourceJobs.map(job => asCachedSourceJob(job, existingBySourceJob.get(job.source_job_id)));
+    // A provider's latest frontier is still fetched each hour, because not
+    // every ATS exposes a reliable posted-after filter. Once it is in hand,
+    // only new, changed, or still-unenriched postings need matching work. A
+    // daily reconciliation continues to cover edits that a provider surfaces
+    // outside that frontier.
+    const workItemIds = new Set(cachedSourceJobs.filter(job => {
+      const existing = existingBySourceJob.get(job.source_job_id);
+      return !existing || existing.status !== "open" || !existing.description ||
+        (ingestionState && Boolean(job.listing_hash) && existing.listing_hash !== job.listing_hash) ||
+        (Boolean(job.description) && existing.content_hash !== job.content_hash);
+    }).map(job => job.source_job_id));
+    const onlyProcessChanged = options.catalogOnly && scan.meta.mode === "incremental";
+    const matchingCandidates = onlyProcessChanged
+      ? cachedSourceJobs.filter(job => workItemIds.has(job.source_job_id))
+      : cachedSourceJobs;
     const candidatesByUser = new Map<string, NormalizedSourceJob[]>();
     const candidatesToHydrate = new Map<string, NormalizedSourceJob>();
     for (const item of subscriberProfiles) {
-      const candidates = cachedSourceJobs.slice(0, MAX_CANDIDATES_PER_USER);
+      const candidates = matchingCandidates.slice(0, MAX_CANDIDATES_PER_USER);
       candidatesByUser.set(item.subscription.user_id, candidates);
       if (detailProvider) {
         for (const job of candidates) {
@@ -293,7 +317,7 @@ export async function syncSource(source: any): Promise<SyncResult> {
     // details are covered, use any remaining inline budget to enrich the
     // general company catalog.
     if (detailProvider) {
-      for (const job of cachedSourceJobs) {
+      for (const job of matchingCandidates) {
         if (!job.description && candidatesToHydrate.size < MAX_INLINE_DETAIL_HYDRATIONS) {
           candidatesToHydrate.set(job.source_job_id, job);
         }
@@ -471,7 +495,10 @@ export async function syncSource(source: any): Promise<SyncResult> {
       await createInAppAlerts(item.subscription, newlyRecommended);
     }
 
-    const interval = Math.max(15, source.sync_interval_minutes || 15);
+    // One complete catalog sweep is scheduled hourly. Individual user actions
+    // can still request a direct source scan, but should not permanently pull
+    // the shared source into a more expensive cadence.
+    const interval = Math.max(60, source.sync_interval_minutes || 60);
     await database.from("job_sources").update({
       last_sync_completed_at: now,
       last_sync_error: null,
@@ -523,7 +550,7 @@ export async function syncSource(source: any): Promise<SyncResult> {
   } catch (error) {
     const message = readableError(error);
     const failures = (source.consecutive_failures || 0) + 1;
-    const retryMinutes = Math.min(240, Math.max(15, (source.sync_interval_minutes || 15) * Math.pow(2, Math.min(failures - 1, 4))));
+    const retryMinutes = Math.min(240, Math.max(60, (source.sync_interval_minutes || 60) * Math.pow(2, Math.min(failures - 1, 4))));
     await database.from("job_sources").update({
       last_sync_error: message,
       consecutive_failures: failures,
@@ -552,7 +579,34 @@ export async function syncDueSources(options: { force?: boolean; limit?: number;
   // Keep provider pressure bounded while avoiding one slow company blocking
   // every other followed source in a manual or scheduled scan.
   for (let index = 0; index < allowedSources.length; index += 3) {
-    results.push(...await Promise.all(allowedSources.slice(index, index + 3).map(syncSource)));
+    results.push(...await Promise.all(allowedSources.slice(index, index + 3).map((source: any) => syncSource(source))));
+  }
+  return results;
+}
+
+/**
+ * Scan every enabled source, not merely sources with a current follower.
+ * Sharding is deterministic so GitHub Actions can run several bounded Vercel
+ * invocations in parallel without scanning the same employer twice.
+ */
+export async function syncCatalogSources(options: { shard?: number; shards?: number } = {}) {
+  const shard = Math.max(0, Math.floor(options.shard || 0));
+  const shards = Math.max(1, Math.min(8, Math.floor(options.shards || 1)));
+  if (shard >= shards) throw new Error("Invalid catalog sync shard");
+
+  const sources: any[] = [];
+  const pageSize = 250;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await db().from("job_sources").select("*")
+      .eq("enabled", true).order("id", { ascending: true }).range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    sources.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  const assigned = sources.filter((_, index) => index % shards === shard);
+  const results: SyncResult[] = [];
+  for (let index = 0; index < assigned.length; index += 3) {
+    results.push(...await Promise.all(assigned.slice(index, index + 3).map((source: any) => syncSource(source, { catalogOnly: true }))));
   }
   return results;
 }

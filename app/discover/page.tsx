@@ -47,6 +47,7 @@ export default function DiscoverPage() {
   const [approvingRecommendations, setApprovingRecommendations] = useState(false);
   const [notifications, setNotifications] = useState<DiscoveryNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [sourceError, setSourceError] = useState("");
@@ -125,7 +126,9 @@ export default function DiscoverPage() {
 
   async function loadJobs(overrides?: Partial<{ query: string; company: string; location: string; workplace: string; freshness: string; scope: "matches" | "all" }>, resultLimit = 50) {
     const requestId = ++jobRequestSequence.current;
-    setLoading(true); setError("");
+    if (jobs.length === 0) setLoading(true);
+    else setRefreshing(true);
+    setError("");
     try {
       const filters = {
         query: overrides?.query ?? query, company: overrides?.company ?? company, location: overrides?.location ?? location,
@@ -151,7 +154,12 @@ export default function DiscoverPage() {
       const message = caught instanceof Error ? caught.message : "Unable to load jobs";
       setError(message);
       if (message === "Authentication required" || message.includes("session")) router.push("/login");
-    } finally { if (requestId === jobRequestSequence.current) setLoading(false); }
+    } finally {
+      if (requestId === jobRequestSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
   }
 
   async function loadCompanionData() {
@@ -174,16 +182,48 @@ export default function DiscoverPage() {
     } catch (caught) { setSourceError(caught instanceof Error ? caught.message : "Unable to load companies"); }
   }
 
+  async function refreshDueCompaniesInBackground() {
+    try {
+      const response = await discoveryFetch("/api/discover/sync", {
+        method: "POST",
+        body: JSON.stringify({ background: true }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.sources) return;
+      // Do not interrupt the feed the user is already reading. Refresh the
+      // lightweight company metadata so the freshness label becomes accurate.
+      void loadCompanionData();
+    } catch {
+      // The hourly catalog job is the durable path; a best-effort login check
+      // should never surface a disruptive error in the discovery interface.
+    }
+  }
+
   useEffect(() => {
-    loadJobs(); loadCompanionData();
+    void loadJobs();
+    // Keep the first feed response focused on the saved job list. The drawer,
+    // notification panel, and preferences can hydrate once the browser is idle.
+    const idle = window.setTimeout(() => {
+      void loadCompanionData();
+      void refreshDueCompaniesInBackground();
+    }, 0);
     shouldShowOnboarding("discover").then(async should => {
       if (!should) return;
       const state = await getOnboardingState();
       setOnboardingStep(Math.min(state?.step || 0, onboardingSteps.length - 1));
       setShowOnboarding(true);
     });
+    return () => window.clearTimeout(idle);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+
+  useEffect(() => {
+    if (!jobs.length) return;
+    // Preload the first visible detail routes in idle time. Opening a role then
+    // feels like a continuation of the list rather than another cold load.
+    const idle = window.setTimeout(() => jobs.slice(0, 12).forEach(job => router.prefetch(`/discover/${job.id}`)), 150);
+    return () => window.clearTimeout(idle);
+  }, [jobs, router]);
 
   async function moveOnboarding(nextStep: number) {
     const bounded = Math.max(0, Math.min(nextStep, onboardingSteps.length - 1));
@@ -213,7 +253,9 @@ export default function DiscoverPage() {
 
   const unreadCount = notifications.filter(item => !item.read_at).length;
   const followedSources = sources.filter(source => source.subscribed);
-  const latestCompletedScan = followedSources.map(source => source.last_sync_completed_at).filter((value): value is string => Boolean(value)).sort().at(-1) || null;
+  // The oldest completed source is the truthful freshness boundary: a newer
+  // scan for one company must not make the entire monitored list look newer.
+  const oldestCompletedScan = followedSources.map(source => source.last_sync_completed_at).filter((value): value is string => Boolean(value)).sort().at(0) || null;
   const dueSourceCount = followedSources.filter(source => !source.next_sync_at || new Date(source.next_sync_at).getTime() <= Date.now()).length;
   const companyFilterOptions = useMemo(() => Array.from(new Set([
     ...sources.map(source => source.company_name),
@@ -386,7 +428,7 @@ export default function DiscoverPage() {
             <button onClick={() => { setShowNotifications(value => !value); if (!showNotifications && unreadCount) markNotificationsRead(); }} className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:border-gray-400" aria-label="Job alerts">
               <Bell className="h-4 w-4" />{unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1 text-[10px] font-bold text-white">{unreadCount}</span>}
             </button>
-            <div className="flex flex-col items-end gap-1"><button id="scan-now-button" onClick={handleSync} disabled={syncing || dueSourceCount === 0} className="inline-flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 disabled:cursor-default disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />{syncing ? "Checking due companies" : dueSourceCount ? `Check next ${Math.min(6, dueSourceCount)}` : "Up to date"}</button>{latestCompletedScan && <span className="pr-1 text-[11px] text-gray-500">Latest check {timeAgo(latestCompletedScan)}{dueSourceCount ? ` · ${dueSourceCount} due` : ""}</span>}</div>
+            <div className="flex flex-col items-end gap-1"><button id="scan-now-button" onClick={handleSync} disabled={syncing || dueSourceCount === 0} className="inline-flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 disabled:cursor-default disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />{syncing ? "Checking due companies" : dueSourceCount ? `Check next ${Math.min(6, dueSourceCount)}` : "Up to date"}</button>{oldestCompletedScan && <span className="pr-1 text-[11px] text-gray-500">{dueSourceCount ? `Oldest check ${timeAgo(oldestCompletedScan)} · ${dueSourceCount} due` : `All followed companies checked ${timeAgo(oldestCompletedScan)}`}</span>}</div>
             <button id="companies-button" onClick={() => setShowCompanies(true)} className="inline-flex h-10 items-center gap-2 rounded-full bg-gray-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"><Building2 className="h-4 w-4" />Companies</button>
             {showNotifications && (
               <div className="absolute right-0 top-12 z-30 w-[min(390px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
@@ -418,7 +460,7 @@ export default function DiscoverPage() {
         </form>
 
         <section id="discovery-results" className="mt-7 overflow-hidden rounded-[1.5rem] bg-white shadow-sm ring-1 ring-gray-200/80">
-          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-7"><h2 className="font-semibold">Latest openings</h2><span className="text-xs text-gray-500">{resultSummary.total} results</span></div>
+          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-7"><h2 className="font-semibold">Latest openings</h2><span className="inline-flex items-center gap-2 text-xs text-gray-500">{refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-500" />}{resultSummary.total} results</span></div>
           {loading ? <div className="py-24 text-center"><RefreshCw className="mx-auto h-6 w-6 animate-spin text-indigo-500" /><p className="mt-3 text-sm text-gray-500">Loading jobs…</p></div>
           : error ? <div className="py-20 text-center text-rose-700"><CircleAlert className="mx-auto h-7 w-7" /><p className="mt-3 font-semibold">Could not load jobs</p><p className="mt-1 text-sm">{error}</p></div>
           : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" /><p className="mt-4 font-semibold">No jobs match this view</p><p className="mt-1 text-sm text-gray-500">Try another filter or follow more companies.</p></div>
@@ -454,7 +496,7 @@ export default function DiscoverPage() {
             {sourceScanNotice && <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950">No current {sourceScanNotice.company} roles match your profile</p><p className="mt-1 text-xs leading-5 text-amber-900/75">We’ll keep checking. {sourceScanNotice.fallbackImported ? `${sourceScanNotice.fallbackImported} of the newest roles were saved to the shared catalog.` : "There were no recent roles available to save."}</p><div className="mt-3 flex flex-wrap gap-3">{sourceScanNotice.careerUrl && <a href={sourceScanNotice.careerUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-700 hover:underline">Browse official careers <ExternalLink className="ml-1 inline h-3 w-3" /></a>}<a href="/dashboard/new" className="text-xs font-semibold text-indigo-700 hover:underline">Import a job link</a></div></div>}
             <div className="rounded-2xl border border-gray-200 bg-white p-4">
               <div className="flex items-center justify-between"><div><p className="text-sm font-semibold">Email digest</p><p className="mt-0.5 text-xs text-gray-500">Only new matches at or above your threshold.</p></div><button onClick={() => { const next = { ...preferences, email_enabled: !preferences.email_enabled }; setPreferences(next); void savePreferences(next); }} disabled={savingPreferences} className={`relative h-6 w-11 rounded-full transition ${preferences.email_enabled ? "bg-indigo-600" : "bg-gray-300"}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${preferences.email_enabled ? "left-6" : "left-1"}`} /></button></div>
-              <div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-gray-600">Frequency<select value={preferences.digest_frequency_minutes} onChange={event => { const next = { ...preferences, digest_frequency_minutes: Number(event.target.value) }; setPreferences(next); void savePreferences(next); }} className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"><option value={15}>Every 15 min</option><option value={60}>Hourly</option><option value={360}>Every 6 hours</option><option value={1440}>Daily</option><option value={10080}>Weekly</option></select></label><label className="text-xs font-semibold text-gray-600">Minimum fit<select value={preferences.minimum_fit_score} onChange={event => { const next = { ...preferences, minimum_fit_score: Number(event.target.value) }; setPreferences(next); void savePreferences(next); }} className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"><option value={45}>45 · Potential</option><option value={60}>60 · Good</option><option value={75}>75 · Strong</option></select></label></div>
+              <div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-gray-600">Frequency<select value={preferences.digest_frequency_minutes < 60 ? 60 : preferences.digest_frequency_minutes} onChange={event => { const next = { ...preferences, digest_frequency_minutes: Number(event.target.value) }; setPreferences(next); void savePreferences(next); }} className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"><option value={60}>Hourly</option><option value={360}>Every 6 hours</option><option value={1440}>Daily</option><option value={10080}>Weekly</option></select></label><label className="text-xs font-semibold text-gray-600">Minimum fit<select value={preferences.minimum_fit_score} onChange={event => { const next = { ...preferences, minimum_fit_score: Number(event.target.value) }; setPreferences(next); void savePreferences(next); }} className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"><option value={45}>45 · Potential</option><option value={60}>60 · Good</option><option value={75}>75 · Strong</option></select></label></div>
             </div>
             <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold">Where should we look?</p><p className="mt-0.5 text-xs leading-5 text-gray-500">Explicit preferences override guesses from your résumé.</p></div><MapPin className="h-4 w-4 text-indigo-600" /></div>

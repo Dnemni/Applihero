@@ -2,26 +2,29 @@ name: Sync discovery jobs
 
 on:
   schedule:
-    # Every 15 minutes, offset from the top of the hour to reduce scheduler delays.
-    - cron: "7,22,37,52 * * * *"
+    # One complete, sharded catalog sweep at the start of every hour.
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions: {}
 
-concurrency:
-  group: discovery-sync
-  cancel-in-progress: false
-
 jobs:
   sync:
-    name: Scan watched companies and send due digests
+    name: Scan catalog shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    concurrency:
+      group: discovery-sync-${{ matrix.shard }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - name: Trigger secure production sync
         env:
           DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
-          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover?shard=${{ matrix.shard }}&shards=4
         run: |
           if [ -z "$DISCOVERY_CRON_SECRET" ]; then
             echo "DISCOVERY_CRON_SECRET is not configured."

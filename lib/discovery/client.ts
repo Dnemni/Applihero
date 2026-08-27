@@ -7,9 +7,10 @@ export async function discoveryFetch(input: RequestInfo | URL, init: RequestInit
   if (!session?.access_token) throw new Error("Authentication required");
   return fetch(input, {
     ...init,
-    // Discovery pages are backed by the freshly synchronized Supabase catalog;
-    // do not let a browser reuse a stale response while the watch list updates.
-    cache: "no-store",
+    // The server returns a short, private freshness window for read-only feed
+    // requests. This makes back/forward navigation feel immediate while never
+    // sharing one user's recommendations with another user.
+    cache: init.cache || (String(init.method || "GET").toUpperCase() === "GET" ? "default" : "no-store"),
     headers: {
       ...init.headers,
       Authorization: `Bearer ${session.access_token}`,

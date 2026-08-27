@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
     const user = await requireApiUser(request);
     const body = await request.json().catch(() => ({}));
     const sourceId = typeof body.sourceId === "string" ? body.sourceId : undefined;
+    const background = body.background === true;
     const startedAt = Date.now();
     const force = sourceId ? true : body.force === true;
     const results = await syncDueSources({ force, limit: sourceId ? 1 : INTERACTIVE_SOURCE_LIMIT, sourceId, userId: user.id });
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
       enrichment,
       durationMs: Date.now() - startedAt,
       sourceDurationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
-      message: results.length ? undefined : "No enabled company sources are configured.",
+      message: results.length ? undefined : background ? "All followed companies are already within their hourly freshness window." : "No enabled company sources are configured.",
     });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;

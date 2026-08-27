@@ -13,11 +13,20 @@ export async function POST(request: NextRequest) {
     const user = await requireApiUser(request);
     const body = await request.json().catch(() => ({}));
     const sourceId = typeof body.sourceId === "string" ? body.sourceId : undefined;
+    const sourceIds = Array.isArray(body.sourceIds)
+      ? Array.from(new Set(body.sourceIds.filter((id: unknown): id is string => typeof id === "string"))).slice(0, INTERACTIVE_SOURCE_LIMIT)
+      : [];
+    const requestedSourceIds = sourceId ? [sourceId] : sourceIds;
     const background = body.background === true;
     const startedAt = Date.now();
-    const force = sourceId ? true : body.force === true;
-    const results = await syncDueSources({ force, limit: sourceId ? 1 : INTERACTIVE_SOURCE_LIMIT, sourceId, userId: user.id });
-    const enrichment = await processDiscoveryEnrichment(sourceId ? 8 : 4);
+    const force = requestedSourceIds.length > 0 || body.force === true;
+    const results = await syncDueSources({
+      force,
+      limit: requestedSourceIds.length || INTERACTIVE_SOURCE_LIMIT,
+      sourceIds: requestedSourceIds,
+      userId: user.id,
+    });
+    const enrichment = await processDiscoveryEnrichment(requestedSourceIds.length ? 8 : 4);
     return NextResponse.json({
       synced: results.reduce((sum, result) => sum + result.verified, 0),
       discovered: results.reduce((sum, result) => sum + result.discovered, 0),
@@ -27,6 +36,7 @@ export async function POST(request: NextRequest) {
       enrichment,
       durationMs: Date.now() - startedAt,
       sourceDurationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+      requestedSources: requestedSourceIds.length,
       message: results.length ? undefined : background ? "All followed companies are already within their hourly freshness window." : "No enabled company sources are configured.",
     });
   } catch (error) {

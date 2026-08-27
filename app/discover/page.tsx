@@ -19,6 +19,7 @@ const eligibilityStyles: Record<EligibilityStatus, { dot: string; text: string; 
   unknown: { dot: "bg-amber-400", text: "text-amber-800", score: "text-gray-900" },
   conflict: { dot: "bg-rose-500", text: "text-rose-700", score: "text-rose-700" },
 };
+const INTERACTIVE_SOURCE_BATCH_SIZE = 6;
 
 function companyInitials(company: string) {
   return company.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
@@ -49,6 +50,7 @@ export default function DiscoverPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ completed: number; total: number } | null>(null);
   const [error, setError] = useState("");
   const [sourceError, setSourceError] = useState("");
   const [hasBackground, setHasBackground] = useState(false);
@@ -170,7 +172,8 @@ export default function DiscoverPage() {
       const sourcePayload = await sourceResponse.json();
       const notificationPayload = await notificationResponse.json();
       if (!sourceResponse.ok) throw new Error(sourcePayload.error || "Unable to load companies");
-      setSources(sourcePayload.sources || []); setSourceError("");
+      const loadedSources = sourcePayload.sources || [];
+      setSources(loadedSources); setSourceError("");
       setRecommendedSources(sourcePayload.recommendations || []);
       setSelectedRecommendations((sourcePayload.recommendations || []).slice(0, 4).map((item: DiscoverySourceRecommendation) => item.sourceId));
       if (notificationResponse.ok) setNotifications(notificationPayload.notifications || []);
@@ -179,23 +182,29 @@ export default function DiscoverPage() {
         setPreferences(preferencePayload.preferences);
         setPreferredRegionsInput((preferencePayload.preferences.preferred_regions || []).join(", "));
       }
+      return loadedSources as DiscoverySource[];
     } catch (caught) { setSourceError(caught instanceof Error ? caught.message : "Unable to load companies"); }
   }
 
-  async function refreshDueCompaniesInBackground() {
+  async function refreshDueCompaniesInBackground(loadedSources: DiscoverySource[]) {
+    const now = Date.now();
+    const staleIds = loadedSources
+      .filter(source => source.subscribed && (!source.last_sync_completed_at || now - new Date(source.last_sync_completed_at).getTime() >= 60 * 60_000))
+      .map(source => source.id);
+    if (!staleIds.length) return;
+    setSyncing(true);
+    setSyncProgress({ completed: 0, total: staleIds.length });
     try {
-      const response = await discoveryFetch("/api/discover/sync", {
-        method: "POST",
-        body: JSON.stringify({ background: true }),
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload.sources) return;
+      await syncFollowedCompanyBatches(staleIds);
       // Do not interrupt the feed the user is already reading. Refresh the
-      // lightweight company metadata so the freshness label becomes accurate.
+      // lightweight company metadata when every stale follow has completed.
       void loadCompanionData();
     } catch {
       // The hourly catalog job is the durable path; a best-effort login check
       // should never surface a disruptive error in the discovery interface.
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
     }
   }
 
@@ -204,8 +213,9 @@ export default function DiscoverPage() {
     // Keep the first feed response focused on the saved job list. The drawer,
     // notification panel, and preferences can hydrate once the browser is idle.
     const idle = window.setTimeout(() => {
-      void loadCompanionData();
-      void refreshDueCompaniesInBackground();
+      void loadCompanionData().then(loadedSources => {
+        if (loadedSources) void refreshDueCompaniesInBackground(loadedSources);
+      });
     }, 0);
     shouldShowOnboarding("discover").then(async should => {
       if (!should) return;
@@ -256,7 +266,7 @@ export default function DiscoverPage() {
   // The oldest completed source is the truthful freshness boundary: a newer
   // scan for one company must not make the entire monitored list look newer.
   const oldestCompletedScan = followedSources.map(source => source.last_sync_completed_at).filter((value): value is string => Boolean(value)).sort().at(0) || null;
-  const dueSourceCount = followedSources.filter(source => !source.next_sync_at || new Date(source.next_sync_at).getTime() <= Date.now()).length;
+  const staleFollowedSources = followedSources.filter(source => !source.last_sync_completed_at || Date.now() - new Date(source.last_sync_completed_at).getTime() >= 60 * 60_000);
   const companyFilterOptions = useMemo(() => Array.from(new Set([
     ...sources.map(source => source.company_name),
     ...jobs.map(job => job.company_name),
@@ -271,16 +281,40 @@ export default function DiscoverPage() {
 
   function applyFilters(event?: FormEvent) { event?.preventDefault(); loadJobs(); }
 
-  async function handleSync() {
-    setSyncing(true);
-    try {
-      const response = await discoveryFetch("/api/discover/sync", { method: "POST", body: JSON.stringify({ force: false }) });
+  async function syncFollowedCompanyBatches(sourceIds: string[]) {
+    let completed = 0;
+    const results: Array<{ discovered: number; sources: number; failures: Array<{ error?: string }> }> = [];
+    for (let index = 0; index < sourceIds.length; index += INTERACTIVE_SOURCE_BATCH_SIZE) {
+      const batch = sourceIds.slice(index, index + INTERACTIVE_SOURCE_BATCH_SIZE);
+      const response = await discoveryFetch("/api/discover/sync", {
+        method: "POST",
+        body: JSON.stringify({ sourceIds: batch }),
+      });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to refresh sources");
-      toast.success(payload.sources ? "Due company scans complete" : "Companies are up to date", payload.discovered ? `${payload.discovered} new role${payload.discovered === 1 ? "" : "s"} found.` : payload.sources ? `Checked ${payload.sources} ${payload.sources === 1 ? "company" : "companies"}; no new matches.` : "Background monitoring has already checked every company due right now.");
+      if (!response.ok) throw new Error(payload.error || "Unable to refresh companies");
+      results.push(payload);
+      completed += batch.length;
+      setSyncProgress({ completed, total: sourceIds.length });
+    }
+    return results;
+  }
+
+  async function handleSync() {
+    const sourceIds = (staleFollowedSources.length ? staleFollowedSources : followedSources).map(source => source.id);
+    if (!sourceIds.length) {
+      setShowCompanies(true);
+      return;
+    }
+    setSyncing(true);
+    setSyncProgress({ completed: 0, total: sourceIds.length });
+    try {
+      const batches = await syncFollowedCompanyBatches(sourceIds);
+      const discovered = batches.reduce((sum, batch) => sum + Number(batch.discovered || 0), 0);
+      const failures = batches.flatMap(batch => batch.failures || []);
+      toast.success(failures.length ? "Company refresh finished with issues" : "Followed companies refreshed", discovered ? `${discovered} new role${discovered === 1 ? "" : "s"} found.` : `Checked ${sourceIds.length} followed ${sourceIds.length === 1 ? "company" : "companies"}.`);
       await Promise.all([loadJobs(), loadCompanionData()]);
     } catch (caught) { toast.error("Refresh failed", caught instanceof Error ? caught.message : "Unable to refresh jobs"); }
-    finally { setSyncing(false); }
+    finally { setSyncing(false); setSyncProgress(null); }
   }
 
   async function scanFollowedSource(sourceId: string) {
@@ -376,7 +410,7 @@ export default function DiscoverPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to follow company");
       setCompanyName(""); setManualCareerUrl(""); setShowManualCareerUrl(false); setCompanyDiscoveryFailed(false); setSourceSuggestion(null);
-      toast.success("Company added", "AppliHero is scanning for relevant roles now, then every 15 minutes.");
+      toast.success("Company added", "AppliHero is scanning for relevant roles now, then hourly.");
       await loadCompanionData();
       void scanFollowedSource(payload.sourceId);
     } catch (caught) { toast.error("Could not follow company", caught instanceof Error ? caught.message : "Try again shortly"); }
@@ -428,7 +462,7 @@ export default function DiscoverPage() {
             <button onClick={() => { setShowNotifications(value => !value); if (!showNotifications && unreadCount) markNotificationsRead(); }} className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:border-gray-400" aria-label="Job alerts">
               <Bell className="h-4 w-4" />{unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1 text-[10px] font-bold text-white">{unreadCount}</span>}
             </button>
-            <div className="flex flex-col items-end gap-1"><button id="scan-now-button" onClick={handleSync} disabled={syncing || dueSourceCount === 0} className="inline-flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 disabled:cursor-default disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />{syncing ? "Checking due companies" : dueSourceCount ? `Check next ${Math.min(6, dueSourceCount)}` : "Up to date"}</button>{oldestCompletedScan && <span className="pr-1 text-[11px] text-gray-500">{dueSourceCount ? `Oldest check ${timeAgo(oldestCompletedScan)} · ${dueSourceCount} due` : `All followed companies checked ${timeAgo(oldestCompletedScan)}`}</span>}</div>
+            <div className="flex flex-col items-end gap-1"><button id="scan-now-button" onClick={handleSync} disabled={syncing || followedSources.length === 0} className="inline-flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 disabled:cursor-default disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />{syncing ? `Checking ${syncProgress?.completed || 0}/${syncProgress?.total || followedSources.length}` : staleFollowedSources.length ? `Refresh ${staleFollowedSources.length} outdated` : `Sync ${followedSources.length} companies`}</button>{oldestCompletedScan && <span className="pr-1 text-[11px] text-gray-500">{staleFollowedSources.length ? `Oldest check ${timeAgo(oldestCompletedScan)} · ${staleFollowedSources.length} outdated` : `All ${followedSources.length} followed companies checked ${timeAgo(oldestCompletedScan)}`}</span>}</div>
             <button id="companies-button" onClick={() => setShowCompanies(true)} className="inline-flex h-10 items-center gap-2 rounded-full bg-gray-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"><Building2 className="h-4 w-4" />Companies</button>
             {showNotifications && (
               <div className="absolute right-0 top-12 z-30 w-[min(390px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">

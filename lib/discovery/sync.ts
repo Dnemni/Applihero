@@ -561,16 +561,20 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
   }
 }
 
-export async function syncDueSources(options: { force?: boolean; limit?: number; sourceId?: string; userId?: string } = {}) {
+export async function syncDueSources(options: { force?: boolean; limit?: number; sourceId?: string; sourceIds?: string[]; userId?: string } = {}) {
+  const requestedSourceIds = Array.from(new Set([
+    ...(options.sourceIds || []),
+    ...(options.sourceId ? [options.sourceId] : []),
+  ])).filter(Boolean);
   let subscriptionQuery = db().from("user_job_source_subscriptions").select("source_id").eq("enabled", true);
   if (options.userId) subscriptionQuery = subscriptionQuery.eq("user_id", options.userId);
-  if (options.sourceId) subscriptionQuery = subscriptionQuery.eq("source_id", options.sourceId);
+  if (requestedSourceIds.length) subscriptionQuery = subscriptionQuery.in("source_id", requestedSourceIds);
   const { data: activeSubscriptions, error: activeSubscriptionError } = await subscriptionQuery;
   if (activeSubscriptionError) throw activeSubscriptionError;
   const subscribedSourceIds = Array.from(new Set((activeSubscriptions || []).map((row: any) => row.source_id))) as string[];
   if (!subscribedSourceIds.length) return [];
   let query = db().from("job_sources").select("*").eq("enabled", true).in("id", subscribedSourceIds).order("next_sync_at", { ascending: true }).limit(options.limit || 12);
-  if (options.sourceId) query = query.eq("id", options.sourceId);
+  if (requestedSourceIds.length) query = query.in("id", requestedSourceIds);
   if (!options.force) query = query.lte("next_sync_at", new Date().toISOString());
   const { data: sources, error } = await query;
   if (error) throw error;

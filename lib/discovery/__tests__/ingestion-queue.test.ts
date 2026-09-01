@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { hourlyBucket, retryDelaySeconds } from "../ingestion-queue";
+
+test("hourly task bucket is stable across duplicate dispatcher calls", () => {
+  const first = hourlyBucket(new Date("2026-08-27T13:59:59.999Z"));
+  const second = hourlyBucket(new Date("2026-08-27T13:00:00.001Z"));
+  assert.equal(first, "2026-08-27T13:00:00.000Z");
+  assert.equal(first, second);
+});
+
+test("retry backoff is bounded and increases by attempt", () => {
+  const first = retryDelaySeconds(1);
+  const later = retryDelaySeconds(4);
+  const capped = retryDelaySeconds(99);
+  assert.ok(first >= 300 && first < 330);
+  assert.ok(later >= 2400 && later < 2430);
+  assert.ok(capped >= 3600 && capped < 3630);
+});
+
+test("queue migration enforces idempotency and atomic concurrent claims", async () => {
+  const migration = await readFile(new URL("../../../supabase/migrations/20260827000000_add_discovery_ingestion_task_queue.sql", import.meta.url), "utf8");
+  assert.match(migration, /UNIQUE\(source_id, scheduled_for\)/);
+  assert.match(migration, /enqueue_discovery_ingestion_hour/);
+  assert.match(migration, /ON CONFLICT \(source_id, scheduled_for\) DO NOTHING/);
+  assert.match(migration, /claim_discovery_ingestion_tasks/);
+  assert.match(migration, /FOR UPDATE SKIP LOCKED/);
+  assert.match(migration, /finish_discovery_ingestion_task/);
+  assert.match(migration, /lease_token = p_lease_token/);
+});

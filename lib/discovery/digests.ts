@@ -5,17 +5,23 @@ const db = () => supabaseAdmin as any;
 
 export async function sendDueDiscoveryDigests(limit = 50) {
   const now = new Date();
-  const { data: preferences, error } = await db().from("user_discovery_preferences")
-    .select("user_id, digest_frequency_minutes, minimum_fit_score, profiles(email, email_notifications)")
-    .eq("email_enabled", true).lte("next_digest_at", now.toISOString()).limit(limit);
-  if (error && (error.code === "42P01" || error.code === "PGRST205")) return [];
+  const lockToken = crypto.randomUUID();
+  const { data: preferences, error } = await db().rpc("claim_discovery_digest_preferences", {
+    p_limit: Math.max(1, Math.min(limit, 100)), p_lock_token: lockToken,
+  });
+  if (error && (error.code === "42P01" || error.code === "PGRST202" || error.code === "PGRST205")) return [];
   if (error) throw error;
   const results = [];
   for (const preference of preferences || []) {
-    const profile = Array.isArray(preference.profiles) ? preference.profiles[0] : preference.profiles;
+    // RPC rows are the physical preference table, so fetch the small profile
+    // projection after the atomic claim rather than relying on a join shape.
+    const { data: profile, error: profileError } = await db().from("profiles")
+      .select("email, email_notifications").eq("id", preference.user_id).maybeSingle();
+    if (profileError) throw profileError;
     const nextDigestAt = new Date(Date.now() + preference.digest_frequency_minutes * 60_000).toISOString();
     if (!profile?.email || profile.email_notifications === false) {
-      await db().from("user_discovery_preferences").update({ last_digest_at: now.toISOString(), next_digest_at: nextDigestAt }).eq("user_id", preference.user_id);
+      await db().from("user_discovery_preferences").update({ last_digest_at: now.toISOString(), next_digest_at: nextDigestAt, digest_lock_token: null, digest_locked_until: null })
+        .eq("user_id", preference.user_id).eq("digest_lock_token", lockToken);
       continue;
     }
     const { data: notifications, error: notificationError } = await db().from("discovery_notifications")
@@ -24,7 +30,8 @@ export async function sendDueDiscoveryDigests(limit = 50) {
     const notificationIds = (notifications || []).map((item: any) => item.id);
     const jobIds = Array.from(new Set((notifications || []).flatMap((item: any) => item.job_ids || [])));
     if (!jobIds.length) {
-      await db().from("user_discovery_preferences").update({ last_digest_at: now.toISOString(), next_digest_at: nextDigestAt }).eq("user_id", preference.user_id);
+      await db().from("user_discovery_preferences").update({ last_digest_at: now.toISOString(), next_digest_at: nextDigestAt, digest_lock_token: null, digest_locked_until: null })
+        .eq("user_id", preference.user_id).eq("digest_lock_token", lockToken);
       continue;
     }
     const { data: recommendations, error: recommendationError } = await db().from("user_job_recommendations")
@@ -41,7 +48,11 @@ export async function sendDueDiscoveryDigests(limit = 50) {
       if (notificationIds.length) await db().from("discovery_notifications").update({ email_error: sendError instanceof Error ? sendError.message : "Email failed" }).in("id", notificationIds);
       results.push({ userId: preference.user_id, sent: 0, error: true });
     }
-    await db().from("user_discovery_preferences").update({ last_digest_at: now.toISOString(), next_digest_at: nextDigestAt }).eq("user_id", preference.user_id);
+    const failed = results[results.length - 1]?.error === true;
+    await db().from("user_discovery_preferences").update({
+      ...(failed ? { next_digest_at: new Date(Date.now() + 15 * 60_000).toISOString() } : { last_digest_at: now.toISOString(), next_digest_at: nextDigestAt }),
+      digest_lock_token: null, digest_locked_until: null,
+    }).eq("user_id", preference.user_id).eq("digest_lock_token", lockToken);
   }
   return results;
 }

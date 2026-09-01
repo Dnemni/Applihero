@@ -26,22 +26,31 @@ jobs:
     name: Claim discovery work ${{ matrix.worker }}
     needs: dispatch
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    # Four jobs, one task per call: only four sources run at once. Each job
+    # keeps claiming until the hour's queue is empty, which provides capacity
+    # for the full catalog rather than only one small batch per schedule.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        # Eight in-flight sources (four workers × two parallel tasks) keeps
-        # provider and Postgres writes below the contention observed at 24.
+        # Four in-flight sources keeps provider and Postgres writes below the
+        # contention observed at 24 concurrent scans.
         worker: [1, 2, 3, 4]
     steps:
-      - name: Claim and scan a bounded task batch
+      - name: Drain bounded source tasks at safe concurrency
         env:
           DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
-          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/worker?limit=2
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/worker?limit=1
         run: |
           test -n "$DISCOVERY_CRON_SECRET"
-          curl --fail-with-body --silent --show-error --max-time 300 --retry 1 --retry-all-errors \
-            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL"
+          for round in $(seq 1 34); do
+            response=$(curl --fail-with-body --silent --show-error --max-time 300 --retry 1 --retry-all-errors \
+              --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL")
+            echo "$response"
+            if echo "$response" | grep -q '"claimed":0'; then
+              break
+            fi
+          done
 
   finalize:
     name: Finalize discovery enrichment and digests

@@ -153,10 +153,18 @@ export interface DiscoverySource {
   enabled: boolean;
   featured?: boolean;
   last_sync_completed_at: string | null;
+  last_successful_scan_at?: string | null;
   next_sync_at?: string | null;
   last_sync_error: string | null;
   sync_interval_minutes: number;
   subscribed: boolean;
+  ingestion_task?: {
+    status: "queued" | "running" | "retry_wait" | "failed";
+    scheduled_for: string;
+    available_at: string;
+    lease_expires_at: string | null;
+    last_error: string | null;
+  } | null;
 }
 
 export interface DiscoverySourceSuggestion {

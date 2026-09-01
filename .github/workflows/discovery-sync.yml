@@ -2,38 +2,57 @@ name: Sync discovery jobs
 
 on:
   schedule:
-    # One complete, sharded catalog sweep at the start of every hour.
     - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
-  sync:
-    name: Scan catalog shard ${{ matrix.shard }}
+  dispatch:
+    name: Enqueue hourly catalog scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Create idempotent source tasks
+        env:
+          DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/dispatch
+        run: |
+          test -n "$DISCOVERY_CRON_SECRET"
+          curl --fail-with-body --silent --show-error --max-time 30 --retry 2 --retry-all-errors \
+            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL"
+
+  worker:
+    name: Claim discovery work ${{ matrix.worker }}
+    needs: dispatch
     runs-on: ubuntu-latest
     timeout-minutes: 6
-    concurrency:
-      group: discovery-sync-${{ matrix.shard }}
-      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        worker: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - name: Trigger secure production sync
+      - name: Claim and scan a bounded task batch
         env:
           DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
-          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover?shard=${{ matrix.shard }}&shards=4
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/worker?limit=2
         run: |
-          if [ -z "$DISCOVERY_CRON_SECRET" ]; then
-            echo "DISCOVERY_CRON_SECRET is not configured."
-            exit 1
-          fi
+          test -n "$DISCOVERY_CRON_SECRET"
+          curl --fail-with-body --silent --show-error --max-time 300 --retry 1 --retry-all-errors \
+            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL"
 
-          curl --fail-with-body --silent --show-error \
-            --max-time 300 \
-            --retry 2 \
-            --retry-all-errors \
-            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" \
-            "$DISCOVERY_CRON_URL"
+  finalize:
+    name: Finalize discovery enrichment and digests
+    needs: [dispatch, worker]
+    if: ${{ always() && needs.dispatch.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Process independent maintenance queues
+        env:
+          DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/finalize
+        run: |
+          test -n "$DISCOVERY_CRON_SECRET"
+          curl --fail-with-body --silent --show-error --max-time 120 --retry 1 --retry-all-errors \
+            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL"

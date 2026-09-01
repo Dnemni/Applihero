@@ -50,6 +50,10 @@ async function main() {
   const scanOnly = process.argv.includes("--scan-only");
   const discoveryOnly = process.argv.includes("--discovery-only");
   const quiet = process.argv.includes("--quiet");
+  const requestedLimit = Number(process.argv.find(argument => argument.startsWith("--limit="))?.slice("--limit=".length));
+  const companies = Number.isInteger(requestedLimit) && requestedLimit > 0
+    ? TARGET_COMPANIES.slice(0, Math.min(requestedLimit, TARGET_COMPANIES.length))
+    : TARGET_COMPANIES;
   if (TARGET_COMPANIES.length !== 100) throw new Error(`Expected 100 companies, received ${TARGET_COMPANIES.length}`);
   const { createClient } = await import("@supabase/supabase-js");
   const database = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -76,7 +80,7 @@ async function main() {
     const current = preferredByCompany.get(key);
     if (!current || (current.provider === "career_site" && source.provider !== "career_site")) preferredByCompany.set(key, source);
   }
-  const targets: AuditTarget[] = TARGET_COMPANIES.map(company => ({
+  const targets: AuditTarget[] = companies.map(company => ({
     company,
     source: preferredByCompany.get(companyKey(company)) || null,
     sourceOrigin: preferredByCompany.has(companyKey(company)) ? "existing" : null,

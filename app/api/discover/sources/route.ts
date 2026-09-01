@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await requireApiUser(request);
     const [{ data: sources, error: sourceError }, { data: subscriptions, error: subscriptionError }, background, openJobs] = await Promise.all([
-      db().from("job_sources").select("id, provider, external_key, company_name, career_url, enabled, featured, last_sync_completed_at, next_sync_at, last_sync_error, sync_interval_minutes").eq("enabled", true).order("featured", { ascending: false }).order("company_name"),
+      db().from("job_sources").select("id, provider, external_key, company_name, career_url, enabled, featured, last_sync_completed_at, last_successful_scan_at, next_sync_at, last_sync_error, sync_interval_minutes").eq("enabled", true).order("featured", { ascending: false }).order("company_name"),
       db().from("user_job_source_subscriptions").select("source_id, notify_email, min_fit_score").eq("user_id", user.id).eq("enabled", true),
       getUserBackground(user.id),
       getDiscoverySourceRecommendationCandidates(120),
@@ -28,11 +28,23 @@ export async function GET(request: NextRequest) {
     if (sourceError) throw sourceError;
     if (subscriptionError) throw subscriptionError;
     const followed = new Map((subscriptions || []).map((item: any) => [item.source_id, item]));
+    const followedSourceIds = Array.from(followed.keys());
+    const { data: activeTasks, error: taskError } = followedSourceIds.length
+      ? await db().from("discovery_ingestion_tasks")
+        .select("source_id,status,scheduled_for,available_at,lease_expires_at,last_error")
+        .in("source_id", followedSourceIds)
+        .in("status", ["queued", "running", "retry_wait", "failed"])
+        .order("scheduled_for", { ascending: false })
+      : { data: [], error: null };
+    if (taskError && taskError.code !== "42P01" && taskError.code !== "PGRST205") throw taskError;
+    const activeTaskBySource = new Map<string, any>();
+    for (const task of activeTasks || []) if (!activeTaskBySource.has(task.source_id)) activeTaskBySource.set(task.source_id, task);
     const visibleSources = (sources || []).map((source: any) => ({
       ...source,
       last_sync_error: sourceErrorMessage(source.last_sync_error),
       subscribed: followed.has(source.id),
       subscription: followed.get(source.id) || null,
+      ingestion_task: activeTaskBySource.get(source.id) || null,
     }));
     const scoresBySource = new Map<string, number>();
     const applicantProfile = getDiscoveryApplicantProfile(background);

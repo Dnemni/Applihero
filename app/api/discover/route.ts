@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
-import { getCatalogDiscoveryJobs, getUserApplicationStates, hasUserBackground, hasUserSubscriptions } from "@/lib/discovery/repository";
-import { getUserBackground } from "@/lib/discovery/repository";
+import { getCatalogDiscoveryJobs, getUserApplicationStates, getUserRecommendedJobPage, getUserSourceIds, hasUserBackground, hasUserSubscriptions } from "@/lib/discovery/repository";
+import { getUserBackground, saveRecommendationFit } from "@/lib/discovery/repository";
 import { applyDiscoveryEligibilityGate, buildQuickFit, MATCHER_VERSION } from "@/lib/discovery/matcher";
 import { hashText } from "@/lib/discovery/parser";
 import type { DiscoveryJobCard } from "@/lib/discovery/types";
@@ -34,35 +34,44 @@ export async function GET(request: NextRequest) {
     const company = request.nextUrl.searchParams.get("company")?.trim() || "";
     const location = request.nextUrl.searchParams.get("location")?.trim() || "";
     const workplace = request.nextUrl.searchParams.get("workplace")?.trim() || "";
-    const freshness = Number(request.nextUrl.searchParams.get("freshness") || 0);
+    const rawFreshness = request.nextUrl.searchParams.get("freshness");
+    const freshness = Number(rawFreshness || 0);
     const scope = request.nextUrl.searchParams.get("scope") === "all" ? "all" : "matches";
     const resultLimit = Math.max(20, Math.min(200, Number(request.nextUrl.searchParams.get("limit") || 50)));
     const user = await requireApiUser(request);
-    const [hasBackground, hasSubscriptions, background, catalogJobs, locationRows] = await Promise.all([
+    const [hasBackground, hasSubscriptions, background, sourceIds, locationRows] = await Promise.all([
       hasUserBackground(user.id),
       hasUserSubscriptions(user.id),
       getUserBackground(user.id),
-      getCatalogDiscoveryJobs({ limit: resultLimit, query, company, location, workplace, freshness }),
+      getUserSourceIds(user.id),
       db().from("user_discovery_answers").select("question_key, normalized_value").eq("user_id", user.id).in("question_key", LOCATION_KEYS),
     ]);
     if (locationRows.error) throw locationRows.error;
     const locationPreferences = decodeLocationPreferences(locationRows.data || []);
+    const matchFreshness = rawFreshness === null ? 30 : freshness;
+    const resultPage = scope === "matches"
+      ? await getUserRecommendedJobPage(user.id, { limit: Math.min(200, resultLimit * 3), scope, sourceIds, minimumFitScore: 50, query, company, location, workplace, freshness: matchFreshness })
+      : null;
+    const catalogJobs = scope === "all"
+      ? await getCatalogDiscoveryJobs({ limit: resultLimit, query, company, location, workplace, freshness })
+      : [];
     const profileHash = hashText(background);
     const applicantProfile = getDiscoveryApplicantProfile(background);
-    const recommendations = catalogJobs
-      .filter(job => matchesDiscoveryLocation(job, locationPreferences))
-      .map(job => {
-      const quickFit = applyDiscoveryEligibilityGate({
-        ...buildQuickFit(job, background),
-        matcherVersion: MATCHER_VERSION,
-        evaluatedProfileHash: profileHash,
-        evaluatedJobHash: job.content_hash,
-      }, assessDiscoveryEligibility(job as any, applicantProfile));
-      return { job, quickFit };
+    const recommendations = (resultPage?.items || []).map(item => {
+      const stored = item.quickFit;
+      const fitIsCurrent = stored?.matcherVersion === MATCHER_VERSION && stored.evaluatedProfileHash === profileHash && stored.evaluatedJobHash === item.job.content_hash && typeof stored.discoveryEligible === "boolean";
+      const quickFit = fitIsCurrent ? stored : applyDiscoveryEligibilityGate({
+        ...buildQuickFit(item.job, background), matcherVersion: MATCHER_VERSION, evaluatedProfileHash: profileHash, evaluatedJobHash: item.job.content_hash,
+      }, assessDiscoveryEligibility(item.job as any, applicantProfile));
+      return { ...item, quickFit };
     });
+    const storedFitByJob = new Map((resultPage?.items || []).map(item => [item.job.id, item.quickFit]));
+    const refreshed = recommendations.filter(item => JSON.stringify(item.quickFit) !== JSON.stringify(storedFitByJob.get(item.job.id)));
+    if (refreshed.length) await Promise.all(refreshed.map(item => saveRecommendationFit(user.id, item.job.id, item.quickFit)));
+    const neutralFit = { score: null, band: "needs_information" as const, label: "Not evaluated", reasons: ["All roles is a catalog view. Open a role to review its fit."], supportedCount: 0, requirementCount: 0, eligibility: { status: "unknown" as const, label: "Not evaluated", reasons: ["This catalog role has not been matched to your profile."] } };
     const visibleRecommendations = scope === "matches"
-      ? recommendations.filter(item => item.quickFit.score !== null && item.quickFit.score > 0 && item.quickFit.band !== "likely_conflict" && item.quickFit.eligibility.status !== "conflict")
-      : recommendations;
+      ? recommendations.filter(item => matchesDiscoveryLocation(item.job, locationPreferences)).slice(0, resultLimit)
+      : catalogJobs.filter(job => matchesDiscoveryLocation(job, locationPreferences)).map(job => ({ job, quickFit: neutralFit }));
 
     const applicationStates = await getUserApplicationStates(user.id, visibleRecommendations.map(item => item.job.id));
     const cards: DiscoveryJobCard[] = visibleRecommendations.map(({ job, quickFit }) => {
@@ -77,7 +86,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       jobs: cards,
-      totalResults: visibleRecommendations.length,
+      totalResults: scope === "matches" ? visibleRecommendations.length : catalogJobs.length,
       strongResults: visibleRecommendations.filter(item => item.quickFit.score !== null && item.quickFit.score >= 75 && item.quickFit.band !== "likely_conflict" && item.quickFit.eligibility.status !== "conflict").length,
       hasBackground,
       hasSubscriptions,

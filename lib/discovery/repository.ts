@@ -176,6 +176,8 @@ export async function getUserRecommendedJobs(userId: string, limit = 1_000, opti
 export async function getUserRecommendedJobPage(userId: string, options: {
   limit: number;
   scope: "matches" | "all";
+  sourceIds?: string[];
+  minimumFitScore?: number;
   query?: string;
   company?: string;
   location?: string;
@@ -198,7 +200,8 @@ export async function getUserRecommendedJobPage(userId: string, options: {
       .eq("user_id", userId).eq("active", true)
       .order("discovery_job_id")
       .range(recommendationRows.length, recommendationRows.length + recommendationPageSize - 1);
-    if (options.scope === "matches") query = query.gt("fit_score", 0).neq("fit_band", "likely_conflict").neq("eligibility_status", "conflict");
+    if (options.sourceIds?.length) query = query.in("source_id", options.sourceIds);
+    if (options.scope === "matches") query = query.gte("fit_score", options.minimumFitScore ?? 50).neq("fit_band", "likely_conflict").neq("eligibility_status", "conflict");
     const { data, error } = await query;
     if (error) throw error;
     recommendationRows.push(...(data || []));

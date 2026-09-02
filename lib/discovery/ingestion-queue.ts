@@ -33,11 +33,16 @@ export function retryDelaySeconds(attempt: number) {
 }
 
 export async function enqueueHourlyDiscoveryTasks(scheduledFor = hourlyBucket()) {
-  const { data, error } = await db().rpc("enqueue_discovery_ingestion_hour", {
+  const database = db();
+  const { data: reconciled, error: reconcileError } = await database.rpc("reconcile_discovery_ingestion_tasks");
+  // Keep rolling deployments safe while the additive hardening migration is
+  // still propagating. The normal dispatcher remains available immediately.
+  if (reconcileError && reconcileError.code !== "PGRST202" && reconcileError.code !== "42883") throw reconcileError;
+  const { data, error } = await database.rpc("enqueue_discovery_ingestion_hour", {
     p_scheduled_for: scheduledFor,
   });
   if (error) throw error;
-  return { scheduledFor, ...(Array.isArray(data) ? data[0] : data || {}) };
+  return { scheduledFor, reconciledCount: reconcileError ? 0 : Number(reconciled || 0), ...(Array.isArray(data) ? data[0] : data || {}) };
 }
 
 export async function runDiscoveryIngestionWorker(limit = 2) {
@@ -107,6 +112,39 @@ export async function runDiscoveryIngestionWorker(limit = 2) {
     retried: results.filter(result => result.status === "retry_wait").length,
     failed: results.filter(result => result.status === "failed").length,
     results,
+  };
+}
+
+const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+/**
+ * Drain one lane without creating a long-lived worker. A short idle grace
+ * lets another lane finish a task and release a retry before this lane exits.
+ */
+export async function drainDiscoveryIngestionWorker(options: { maxTasks?: number; idlePolls?: number } = {}) {
+  const maxTasks = Math.max(1, Math.min(options.maxTasks || 34, 40));
+  const idlePolls = Math.max(1, Math.min(options.idlePolls || 3, 5));
+  const results: Array<Awaited<ReturnType<typeof runDiscoveryIngestionWorker>>> = [];
+  let idle = 0;
+  let claimed = 0;
+  while (claimed < maxTasks && idle < idlePolls) {
+    const result = await runDiscoveryIngestionWorker(1);
+    results.push(result);
+    claimed += result.claimed;
+    if (result.claimed) {
+      idle = 0;
+      continue;
+    }
+    idle += 1;
+    if (idle < idlePolls) await pause(1_500);
+  }
+  return {
+    claimed,
+    completed: results.reduce((sum, result) => sum + result.completed, 0),
+    retried: results.reduce((sum, result) => sum + result.retried, 0),
+    failed: results.reduce((sum, result) => sum + result.failed, 0),
+    idlePolls: idle,
+    exhaustedCapacity: claimed >= maxTasks,
   };
 }
 

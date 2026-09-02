@@ -43,14 +43,8 @@ jobs:
           DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/worker?limit=1
         run: |
           test -n "$DISCOVERY_CRON_SECRET"
-          for round in $(seq 1 34); do
-            response=$(curl --fail-with-body --silent --show-error --max-time 300 --retry 1 --retry-all-errors \
-              --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL")
-            echo "$response"
-            if echo "$response" | grep -q '"claimed":0'; then
-              break
-            fi
-          done
+          curl --fail-with-body --silent --show-error --max-time 300 --retry 1 --retry-all-errors \
+            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL&drain=1"
 
   finalize:
     name: Finalize discovery enrichment and digests

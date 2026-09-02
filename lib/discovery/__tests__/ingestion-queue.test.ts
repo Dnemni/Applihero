@@ -29,3 +29,11 @@ test("queue migration enforces idempotency and atomic concurrent claims", async 
   assert.match(migration, /finish_discovery_ingestion_task/);
   assert.match(migration, /lease_token = p_lease_token/);
 });
+
+test("operational migration reconciles superseded failed tasks without deleting their audit rows", async () => {
+  const migration = await readFile(new URL("../../../supabase/migrations/20260902000000_harden_discovery_queue_operations.sql", import.meta.url), "utf8");
+  assert.match(migration, /reconcile_discovery_ingestion_tasks/);
+  assert.match(migration, /task\.status IN \('queued', 'retry_wait', 'failed'\)/);
+  assert.match(migration, /source\.last_successful_scan_at >= task\.scheduled_for/);
+  assert.match(migration, /'reconciled', TRUE/);
+});

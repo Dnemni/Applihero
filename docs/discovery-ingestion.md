@@ -6,7 +6,7 @@ page.
 
 ## Pipeline
 
-1. GitHub Actions calls `GET /api/cron/discover/dispatch` with `CRON_SECRET`.
+1. A first-party hourly trigger calls `GET /api/cron/discover/dispatch` with `CRON_SECRET`.
 2. The dispatcher inserts one idempotent task per enabled `job_sources` row in
    `discovery_ingestion_tasks` for the current UTC hour.
 3. Several short `GET /api/cron/discover/worker` invocations atomically claim
@@ -25,6 +25,11 @@ page.
 
 `source_published_at` is the provider's date. `first_seen_at` is the exact time
 AppliHero first observed a stable provider job ID and is the notification clock.
+
+The shared catalog is independent of individual follows: every enabled company
+is scanned, and Discover searches that catalog. Following a company controls
+email/in-app alerts and permits that user to request a direct, bounded rescan.
+It never limits catalog search results.
 
 ## Provider behavior
 
@@ -93,7 +98,12 @@ private worker HTTP handlers are regular Vercel routes under the same
    calls `https://www.applihero.com/api/cron/discover/dispatch`, then its worker
    pool and finalizer. GitHub Actions is the hourly scheduler; Vercel does not
    need a public cron configuration for this flow.
-4. Push and deploy `.github/workflows/discovery-sync.yml` together with the
+4. The checked-in `vercel.json` supplies a second, first-party hourly trigger:
+   it dispatches at the hour, starts four independent worker lanes one minute
+   later, and finalizes at minute twelve. Vercel attaches `CRON_SECRET`
+   automatically. Confirm your Vercel plan permits hourly cron jobs before
+   relying on this route; GitHub Actions remains the redundant worker trigger.
+5. Push and deploy `.github/workflows/discovery-sync.yml` together with the
    application changes, then run the workflow manually once. Confirm
    `/api/cron/discover/status` reports queued work decreasing and successful
    tasks increasing.
@@ -110,11 +120,30 @@ requests without `Authorization: Bearer <CRON_SECRET>`.
   failed task. The next worker claims it normally.
 - Start with the existing catalog and watch `discovery_scan_runs` for duration,
   board totals, page counts, warnings, and failures.
-- Alert when a healthy source has no successful scan for six hours or reaches
-  five consecutive failures.
+- Alert when queue work is older than 90 minutes, a healthy source has no
+  successful scan for six hours, a task reaches final failure, or a source
+  reaches five consecutive failures. `GET /api/cron/discover/status` returns
+  these conditions in its `alerts` field along with the configured thresholds.
+- A later successful scan automatically reconciles obsolete queued/retry/failed
+  task rows for that source. The audit row remains, marked `reconciled`, so a
+  transient timeout cannot leave operations permanently red after recovery.
 - Keep full-feed closing conservative until two authoritative reconciliations
   agree a job disappeared. Bounded Workday/Eightfold scans must never close jobs
   solely because they fell outside the newest window.
 - Increase provider concurrency only from observed rate-limit and latency data.
+
+## Catalog bootstrap and reconciliation
+
+When a company source is first added, its first scan is a bootstrap: provider
+job IDs are persisted with `first_seen_at`. Later hourly scans upsert against
+that same `(source_id, source_job_id)` identity, so new postings add to the
+cache instead of replacing it. Daily provider-appropriate reconciliation repairs
+frontier/pagination drift.
+
+Public career boards normally expose only open postings. A backfill can ingest
+every currently visible role with a source publication date in the last year;
+it cannot reconstruct roles an employer has already removed from its public
+board. Run the catalog backfill only after the migration and deployment are
+live, at bounded concurrency, and verify queue age/failures between batches.
 - Rediscover/verify a cached board after seven days or repeated failures; do not
   rediscover every scheduled scan.

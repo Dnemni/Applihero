@@ -52,9 +52,10 @@ export async function GET(request: NextRequest) {
     const resultPage = scope === "matches"
       ? await getUserRecommendedJobPage(user.id, { limit: Math.min(200, resultLimit * 3), scope, sourceIds, minimumFitScore: 50, query, company, location, workplace, freshness: matchFreshness })
       : null;
-    const catalogJobs = scope === "all"
+    const catalogPage = scope === "all"
       ? await getCatalogDiscoveryJobs({ limit: resultLimit, query, company, location, workplace, freshness })
-      : [];
+      : { items: [], total: 0 };
+    const catalogJobs = catalogPage.items;
     const profileHash = hashText(background);
     const applicantProfile = getDiscoveryApplicantProfile(background);
     const recommendations = (resultPage?.items || []).map(item => {
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       jobs: cards,
-      totalResults: scope === "matches" ? visibleRecommendations.length : catalogJobs.length,
+      totalResults: scope === "matches" ? visibleRecommendations.length : catalogPage.total,
       strongResults: visibleRecommendations.filter(item => item.quickFit.score !== null && item.quickFit.score >= 75 && item.quickFit.band !== "likely_conflict" && item.quickFit.eligibility.status !== "conflict").length,
       hasBackground,
       hasSubscriptions,

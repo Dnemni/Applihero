@@ -89,6 +89,32 @@ export async function getOpenDiscoveryJobs(limit = 200, sourceIds?: string[]): P
   return (data || []) as DiscoveryJob[];
 }
 
+export async function getCatalogDiscoveryJobs(options: {
+  limit: number;
+  query?: string;
+  company?: string;
+  location?: string;
+  workplace?: string;
+  freshness?: number;
+}): Promise<DiscoveryJob[]> {
+  const safeTerm = (value: string) => value.replace(/[(),.%]/g, " ").trim();
+  let query = db().from("discovery_jobs")
+    .select("*, job_sources(provider, company_name, external_key)")
+    .eq("status", "open")
+    .order("source_published_at", { ascending: false, nullsFirst: false })
+    .order("discovered_at", { ascending: false })
+    .limit(Math.max(20, Math.min(options.limit, 500)));
+  const search = safeTerm(options.query || "");
+  if (search) query = query.or(`title.ilike.%${search}%,company_name.ilike.%${search}%,description.ilike.%${search}%`);
+  if (options.company) query = query.ilike("company_name", `%${safeTerm(options.company)}%`);
+  if (options.location) query = query.ilike("location", `%${safeTerm(options.location)}%`);
+  if (options.workplace) query = query.eq("workplace_type", options.workplace);
+  if (options.freshness && options.freshness > 0) query = query.gte("source_published_at", new Date(Date.now() - options.freshness * 86_400_000).toISOString());
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []) as DiscoveryJob[];
+}
+
 export async function getDiscoverySourceRecommendationCandidates(limit = 120): Promise<DiscoveryJob[]> {
   const { data, error } = await db()
     .from("discovery_jobs")

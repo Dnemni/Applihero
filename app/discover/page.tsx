@@ -196,36 +196,12 @@ export default function DiscoverPage() {
     } catch (caught) { setSourceError(caught instanceof Error ? caught.message : "Unable to load companies"); }
   }
 
-  async function refreshDueCompaniesInBackground(loadedSources: DiscoverySource[]) {
-    const now = Date.now();
-    const staleIds = loadedSources
-      .filter(source => source.subscribed && (!source.last_sync_completed_at || now - new Date(source.last_sync_completed_at).getTime() >= 60 * 60_000))
-      .map(source => source.id);
-    if (!staleIds.length) return;
-    setSyncing(true);
-    setSyncProgress({ completed: 0, total: staleIds.length });
-    try {
-      await syncFollowedCompanyBatches(staleIds);
-      // Do not interrupt the feed the user is already reading. Refresh the
-      // lightweight company metadata when every stale follow has completed.
-      void loadCompanionData();
-    } catch {
-      // The hourly catalog job is the durable path; a best-effort login check
-      // should never surface a disruptive error in the discovery interface.
-    } finally {
-      setSyncing(false);
-      setSyncProgress(null);
-    }
-  }
-
   useEffect(() => {
     void loadJobs();
     // Keep the first feed response focused on the saved job list. The drawer,
     // notification panel, and preferences can hydrate once the browser is idle.
     const idle = window.setTimeout(() => {
-      void loadCompanionData().then(loadedSources => {
-        if (loadedSources) void refreshDueCompaniesInBackground(loadedSources);
-      });
+      void loadCompanionData();
     }, 0);
     shouldShowOnboarding("discover").then(async should => {
       if (!should) return;
@@ -465,7 +441,7 @@ export default function DiscoverPage() {
         <header id="discover-overview" className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-semibold text-indigo-600">Discover</p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Jobs from companies you follow</h1>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Your job discovery feed</h1>
             <p className="mt-2 text-sm text-gray-600">
               {resultSummary.total} open {resultSummary.total === 1 ? "role" : "roles"}{resultSummary.strong ? ` · ${resultSummary.strong} strong ${resultSummary.strong === 1 ? "match" : "matches"}` : ""}
               {followedSources.length ? ` · ${followedSources.length} ${followedSources.length === 1 ? "company" : "companies"} monitored` : ""}
@@ -487,7 +463,7 @@ export default function DiscoverPage() {
         </header>
 
         {!hasBackground && !loading && <div className="mt-6 flex items-center gap-3 border-y border-amber-200 py-3 text-sm text-amber-950"><Sparkles className="h-4 w-4 shrink-0" /><span><strong>Add your résumé</strong> to unlock evidence-based matching and new-job alerts.</span><a href="/profile" className="ml-auto shrink-0 font-semibold text-indigo-700 underline underline-offset-4">Complete profile</a></div>}
-        {!hasSubscriptions && !loading && <div className="mt-6 flex items-center gap-3 border-y border-indigo-200 py-3 text-sm text-indigo-950"><Building2 className="h-4 w-4 shrink-0" /><span>Choose companies to make this feed yours and start automatic monitoring.</span><button onClick={() => setShowCompanies(true)} className="ml-auto shrink-0 font-semibold text-indigo-700">Choose companies</button></div>}
+        {!hasSubscriptions && !loading && <div className="mt-6 flex items-center gap-3 border-y border-indigo-200 py-3 text-sm text-indigo-950"><Building2 className="h-4 w-4 shrink-0" /><span>Search the full catalog now. Follow companies only when you want their roles in alerts and one-tap rescans.</span><button onClick={() => setShowCompanies(true)} className="ml-auto shrink-0 font-semibold text-indigo-700">Manage alerts</button></div>}
 
         <form id="discover-filters" onSubmit={applyFilters} className="mt-7">
           <div className="flex flex-col gap-3 rounded-[1.35rem] bg-white p-2 shadow-sm ring-1 ring-gray-200/80 md:flex-row md:items-center">
@@ -510,7 +486,7 @@ export default function DiscoverPage() {
           <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-7"><h2 className="font-semibold">Latest openings</h2><span className="inline-flex items-center gap-2 text-xs text-gray-500">{refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-500" />}{resultSummary.total} results</span></div>
           {loading ? <div className="py-24 text-center"><RefreshCw className="mx-auto h-6 w-6 animate-spin text-indigo-500" /><p className="mt-3 text-sm text-gray-500">Loading jobs…</p></div>
           : error ? <div className="py-20 text-center text-rose-700"><CircleAlert className="mx-auto h-7 w-7" /><p className="mt-3 font-semibold">Could not load jobs</p><p className="mt-1 text-sm">{error}</p></div>
-          : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" />{!hasSubscriptions ? <><p className="mt-4 font-semibold">Choose companies to start your job radar</p><p className="mt-1 text-sm text-gray-500">Follow employers you care about and we’ll scan their official careers pages.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Choose companies</button></> : activeSourceCount ? <><p className="mt-4 font-semibold">We’re checking your companies</p><p className="mt-1 text-sm text-gray-500">{activeSourceCount} source{activeSourceCount === 1 ? " is" : "s are"} queued or updating. New matching roles will appear here automatically.</p></> : failedSourceCount ? <><p className="mt-4 font-semibold">A company check needs another try</p><p className="mt-1 text-sm text-gray-500">Your existing matches are safe. Open Companies to see which source is retrying.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Review companies</button></> : <><p className="mt-4 font-semibold">No roles match this view</p><p className="mt-1 text-sm text-gray-500">Your companies are checked; try broadening filters, viewing all roles, or following more companies.</p></>}</div>
+          : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" />{activeSourceCount ? <><p className="mt-4 font-semibold">The catalog is updating</p><p className="mt-1 text-sm text-gray-500">{activeSourceCount} source{activeSourceCount === 1 ? " is" : "s are"} queued or updating. New matching roles will appear here automatically.</p></> : failedSourceCount ? <><p className="mt-4 font-semibold">A company check needs another try</p><p className="mt-1 text-sm text-gray-500">Your existing matches are safe. Open Companies to see which source is retrying.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Review companies</button></> : <><p className="mt-4 font-semibold">No roles match this view</p><p className="mt-1 text-sm text-gray-500">Try broadening filters, viewing all roles, or adjusting your location preferences.</p></>}</div>
           : <div>{jobs.map(job => {
             const eligibility = eligibilityStyles[job.quickFit.eligibility.status];
             const reason = job.quickFit.eligibility.reasons[0] || job.quickFit.reasons[0];
@@ -539,7 +515,7 @@ export default function DiscoverPage() {
 
       {showCompanies && <div className="fixed inset-0 z-40 bg-gray-950/25 backdrop-blur-[2px]" onClick={() => setShowCompanies(false)}>
         <aside id="companies-monitor-panel" className="ml-auto flex h-full w-full max-w-lg flex-col bg-[#fffdf8] shadow-2xl" onClick={event => event.stopPropagation()}>
-          <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5"><div><h2 className="text-xl font-bold">Companies to monitor</h2><p className="mt-1 text-sm text-gray-500">Follow only the employers you care about.</p></div><button onClick={() => setShowCompanies(false)} className="rounded-full p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button></div>
+          <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5"><div><h2 className="text-xl font-bold">Company alerts</h2><p className="mt-1 text-sm text-gray-500">The catalog scans every company. Follow only employers you want in alerts and available for a manual rescan.</p></div><button onClick={() => setShowCompanies(false)} className="rounded-full p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button></div>
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {sourceError && <p className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{sourceError}</p>}
             {sourceScanNotice && <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950">No current {sourceScanNotice.company} roles match your profile</p><p className="mt-1 text-xs leading-5 text-amber-900/75">We’ll keep checking. {sourceScanNotice.fallbackImported ? `${sourceScanNotice.fallbackImported} of the newest roles were saved to the shared catalog.` : "There were no recent roles available to save."}</p><div className="mt-3 flex flex-wrap gap-3">{sourceScanNotice.careerUrl && <a href={sourceScanNotice.careerUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-700 hover:underline">Browse official careers <ExternalLink className="ml-1 inline h-3 w-3" /></a>}<a href="/dashboard/new" className="text-xs font-semibold text-indigo-700 hover:underline">Import a job link</a></div></div>}
@@ -564,7 +540,7 @@ export default function DiscoverPage() {
             </div>}
             <label className="mt-5 flex h-11 items-center gap-2 rounded-xl border border-gray-300 bg-white px-3"><Search className="h-4 w-4 text-gray-400" /><input value={catalogQuery} onChange={event => setCatalogQuery(event.target.value)} placeholder={`Search ${sources.length} verified companies`} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
             <div className="mt-2 flex items-center justify-between px-1 text-xs text-gray-500"><span>{visibleSources.length} companies</span><span>{followedSources.length} followed</span></div>
-            <div className="mt-2 space-y-1">{visibleSources.map(source => <button key={source.id} onClick={() => toggleSource(source)} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-white"><span className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${source.subscribed ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600"}`}>{source.subscribed ? <Check className="h-4 w-4" /> : companyInitials(source.company_name)}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{source.company_name}</span><span className="block truncate text-xs capitalize text-gray-500">{providerLabel(source.provider)} · {source.subscribed ? sourceFreshnessLabel(source) : "official careers source"}</span>{source.last_sync_error && source.subscribed && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.last_sync_error}</span>}{source.ingestion_task?.status === "failed" && source.ingestion_task.last_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.ingestion_task.last_error}</span>}</span><span className={`text-xs font-semibold ${source.subscribed ? "text-indigo-700" : "text-gray-400"}`}>{source.subscribed ? "Following" : "Follow"}</span></button>)}</div>
+            <div className="mt-2 space-y-1">{visibleSources.map(source => <button key={source.id} onClick={() => toggleSource(source)} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-white"><span className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${source.subscribed ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600"}`}>{source.subscribed ? <Check className="h-4 w-4" /> : companyInitials(source.company_name)}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{source.company_name}</span><span className="block truncate text-xs capitalize text-gray-500">{providerLabel(source.provider)} · Last updated: {sourceFreshnessLabel(source)}</span>{source.last_sync_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.last_sync_error}</span>}{source.ingestion_task?.status === "failed" && source.ingestion_task.last_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.ingestion_task.last_error}</span>}</span><span className={`text-xs font-semibold ${source.subscribed ? "text-indigo-700" : "text-gray-400"}`}>{source.subscribed ? "Following" : "Follow"}</span></button>)}</div>
             <div className="my-6 h-px bg-gray-200" />
             <form onSubmit={findCompany}>
               <div className="flex items-center gap-2"><Plus className="h-4 w-4 text-indigo-600" /><h3 className="font-semibold">Find another company</h3></div>

@@ -92,6 +92,41 @@ const ambiguousUsStates = new Set(["georgia"]);
 // Requires the "City, ST" shape with the code in upper case so prose words such
 // as "in" or "or" in a lower-cased string never read as Indiana or Oregon.
 const usStateCodes = /,\s*(AL|AK|AZ|AR|CA|CO|CT|DC|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)(?=$|[\s,)\-])/;
+// Well-known non-US cities. A bare "City, XX" where XX collides with a US state
+// code ("Berlin, DE") is a foreign posting, not Delaware, when the city is one
+// of these; they also let "London" or "Bangalore" alone resolve to a country.
+const foreignCities: Record<string, string[]> = {
+  DE: ["berlin", "munich", "münchen", "hamburg", "frankfurt", "stuttgart", "cologne", "köln", "düsseldorf"],
+  GB: ["london", "manchester", "edinburgh", "cambridge, uk", "bristol", "belfast", "glasgow"],
+  IE: ["dublin", "cork"],
+  FR: ["paris", "lyon", "toulouse", "sophia antipolis"],
+  NL: ["amsterdam", "eindhoven", "rotterdam", "utrecht"],
+  ES: ["madrid", "barcelona"],
+  IT: ["milan", "milano", "rome", "roma"],
+  PL: ["warsaw", "kraków", "krakow", "wrocław", "wroclaw", "gdańsk", "gdansk"],
+  CH: ["zurich", "zürich", "geneva", "basel"],
+  SE: ["stockholm", "gothenburg"],
+  DK: ["copenhagen"],
+  CZ: ["prague", "brno"],
+  AT: ["vienna", "wien"],
+  IL: ["tel aviv", "herzliya", "haifa"],
+  IN: ["bangalore", "bengaluru", "hyderabad", "pune", "chennai", "mumbai", "gurgaon", "gurugram", "noida", "delhi", "kolkata"],
+  SG: ["singapore"],
+  JP: ["tokyo", "osaka"],
+  KR: ["seoul"],
+  CN: ["shanghai", "beijing", "shenzhen", "hangzhou", "hong kong", "taipei"],
+  AU: ["sydney", "melbourne", "brisbane", "perth", "canberra"],
+  NZ: ["auckland", "wellington"],
+  CA: ["toronto", "vancouver", "montreal", "montréal", "ottawa", "waterloo", "calgary"],
+  BR: ["são paulo", "sao paulo", "rio de janeiro"],
+  MX: ["mexico city", "ciudad de méxico", "guadalajara", "monterrey"],
+  AR: ["buenos aires"],
+  ZA: ["johannesburg", "cape town"],
+  AE: ["dubai", "abu dhabi"],
+  PH: ["manila", "cebu"],
+  MY: ["kuala lumpur", "cyberjaya"],
+};
+
 const usCities = ["new york city", "nyc", "san francisco", "silicon valley", "bay area", "los angeles", "seattle", "austin", "boston", "chicago", "denver", "atlanta", "dallas", "houston", "phoenix", "miami", "san diego", "san jose", "sunnyvale", "mountain view", "palo alto", "menlo park", "cupertino", "redmond", "bellevue", "washington dc", "washington, d.c.", "pittsburgh", "philadelphia", "portland", "minneapolis", "raleigh", "durham", "charlotte", "nashville", "salt lake city", "las vegas", "detroit", "st. louis", "kansas city", "cambridge, ma", "santa clara", "irvine", "san mateo", "oakland", "berkeley"];
 
 function normalized(value: string | null | undefined) {
@@ -111,13 +146,20 @@ export function splitLocationSegments(location: string | null | undefined) {
   return String(location || "").split(/\s*(?:;|\||\/|\bor\b|\band\b|·|•)\s*/i).map(part => part.trim()).filter(Boolean);
 }
 
+function foreignCityCountries(segment: string) {
+  return Object.entries(foreignCities).filter(([, cities]) => cities.some(city => containsTerm(segment, city))).map(([code]) => code);
+}
+
 /** `original` keeps provider casing so "Austin, TX" is a state code while "in" or "or" in prose is not. */
 function hasUnitedStatesSignal(original: string) {
   const segment = normalized(original);
-  return countryAliases.US.some(alias => containsTerm(segment, alias)) ||
+  const explicit = countryAliases.US.some(alias => containsTerm(segment, alias)) ||
     usStates.some(state => !ambiguousUsStates.has(state) && containsTerm(segment, state)) ||
-    usStateCodes.test(original) ||
     usCities.some(city => containsTerm(segment, city));
+  if (explicit) return true;
+  // "Berlin, DE" is Germany, not Delaware: a state code only counts when the
+  // segment does not name a well-known foreign city.
+  return usStateCodes.test(original) && !foreignCityCountries(segment).length;
 }
 
 function countriesInSegment(original: string) {
@@ -127,6 +169,7 @@ function countriesInSegment(original: string) {
     if (code === "US") continue;
     if (aliases.some(alias => containsTerm(segment, alias))) found.push(code);
   }
+  for (const code of foreignCityCountries(segment)) if (!found.includes(code)) found.push(code);
   // "Georgia" alone is the country; "Atlanta, Georgia" or "Georgia, US" is the state.
   const mentionsGeorgia = containsTerm(segment, "georgia");
   const georgiaIsState = mentionsGeorgia && (hasUnitedStatesSignal(original) || /\batlanta\b|\bsavannah\b/.test(segment));

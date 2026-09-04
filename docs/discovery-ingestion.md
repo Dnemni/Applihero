@@ -22,6 +22,17 @@ page.
    updates the canonical `discovery_jobs` row.
 7. Enriched jobs enter the existing per-user eligibility/matching flow. A source
    bootstrap seeds the catalog without generating a burst of new-job alerts.
+8. The finalizer also runs the bounded rematch step
+   (`lib/discovery/rematch.ts`): stored fit rows whose profile hash, matcher
+   version, or posting hash is stale are recomputed, highest stored score
+   first, within a time budget. The Discover page never recomputes scores; it
+   reads stored rows and can request `POST /api/discover/rematch` for the
+   signed-in user. See `discovery-feed-read-path.md`.
+
+Every persisted posting also carries normalized geography
+(`location_countries`, `location_remote`) computed by
+`lib/discovery/location.ts` so the shared catalog can be filtered and paged by
+the saved location preference inside Postgres.
 
 `source_published_at` is the provider's date. `first_seen_at` is the exact time
 AppliHero first observed a stable provider job ID and is the notification clock.
@@ -64,11 +75,24 @@ npx supabase db push
 ```
 
 The migrations are
-`supabase/migrations/20260825000000_add_discovery_ingestion_pipeline.sql` and
-`supabase/migrations/20260827000000_add_discovery_ingestion_task_queue.sql`.
+`supabase/migrations/20260825000000_add_discovery_ingestion_pipeline.sql`,
+`supabase/migrations/20260827000000_add_discovery_ingestion_task_queue.sql`,
+`supabase/migrations/20260902000000_harden_discovery_queue_operations.sql`, and
+`supabase/migrations/20260904000000_add_discovery_location_columns.sql`.
 Together they add observation timestamps, source telemetry, detail enrichment,
-and the durable hourly task queue. Existing jobs are marked as bootstrap
-observations so deployment does not send false alerts.
+the durable hourly task queue, stale-task reconciliation, and normalized
+geography with the indexes the feed queries use. Existing jobs are marked as
+bootstrap observations so deployment does not send false alerts.
+
+After applying the 20260904 migration, populate geography for existing rows:
+
+```bash
+npm run backfill:discovery-locations -- --dry-run
+npm run backfill:discovery-locations
+```
+
+Until the migration is applied the feed keeps working: it filters a bounded
+window in memory and marks catalog totals as estimates.
 
 ## Verification
 
@@ -76,7 +100,15 @@ observations so deployment does not send false alerts.
 npm run test:discovery
 npx tsc --noEmit
 npm run build
+npm run diagnose:discovery-read-path -- --email you@example.com
+npm run measure:discovery-requests -- --email you@example.com --base http://localhost:3000
+npx tsx scripts/browser-discovery-check.ts --email you@example.com --base http://localhost:3000
 ```
+
+The last three profile the feed against real data: per-query database timings,
+end-to-end request timings with `Server-Timing` breakdowns, and a headless
+Chrome pass over the Discover page. They mint a short-lived session for the
+given account with the service role key and never print it.
 
 The deterministic connector tests cover Workday's accepted 20-row request size,
 Eightfold camelCase normalization and warm frontier, Workable details, and known
@@ -98,11 +130,15 @@ private worker HTTP handlers are regular Vercel routes under the same
    calls `https://www.applihero.com/api/cron/discover/dispatch`, then its worker
    pool and finalizer. GitHub Actions is the hourly scheduler; Vercel does not
    need a public cron configuration for this flow.
-4. The checked-in `vercel.json` supplies a second, first-party hourly trigger:
-   it dispatches at the hour, starts four independent worker lanes one minute
-   later, and finalizes at minute twelve. Vercel attaches `CRON_SECRET`
-   automatically. Confirm your Vercel plan permits hourly cron jobs before
-   relying on this route; GitHub Actions remains the redundant worker trigger.
+4. The project is on Vercel's Hobby plan, which only permits cron schedules
+   that run once per day; hourly expressions fail deployment with "Hobby
+   accounts are limited to daily cron jobs". `vercel.json` therefore carries a
+   single daily dispatch as a safety net (the worker lanes under
+   `/api/cron/discover/worker/[lane]` stay available for a Pro plan or an
+   external scheduler). GitHub Actions is the hourly scheduler and runs two
+   staggered schedules (`:00` and `:30`) because its scheduler has been seen
+   skipping slots for hours; the dispatcher is idempotent per hour bucket so
+   the second run only drains leftover work.
 5. Push and deploy `.github/workflows/discovery-sync.yml` together with the
    application changes, then run the workflow manually once. Confirm
    `/api/cron/discover/status` reports queued work decreasing and successful

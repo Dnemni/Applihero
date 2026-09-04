@@ -13,18 +13,18 @@ export async function GET(request: NextRequest) {
   if (!hasCronAuthorization(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const database = db();
-    const [tasks, oldest, failures, sources, recentRuns] = await Promise.all([
-      database.from("discovery_ingestion_tasks").select("status"),
+    // Count per status in the database: a plain select is capped at the API's
+    // max-rows (1,000) and silently under-reports once the task log grows.
+    const TASK_STATUSES = ["queued", "running", "retry_wait", "succeeded", "failed"];
+    const [statusCounts, oldest, failures, sources, recentRuns] = await Promise.all([
+      Promise.all(TASK_STATUSES.map(status => database.from("discovery_ingestion_tasks").select("id", { count: "exact", head: true }).eq("status", status).then((result: any) => ({ status, count: result.count || 0, error: result.error })))),
       database.from("discovery_ingestion_tasks").select("created_at").in("status", ["queued", "retry_wait"]).order("created_at", { ascending: true }).limit(1).maybeSingle(),
       database.from("discovery_scan_runs").select("provider,error,started_at,job_sources(company_name)").eq("status", "failed").order("started_at", { ascending: false }).limit(20),
       database.from("job_sources").select("id,company_name,provider,last_successful_scan_at,consecutive_failures,last_sync_error").eq("enabled", true).order("last_successful_scan_at", { ascending: true, nullsFirst: true }),
       database.from("discovery_scan_runs").select("source_id,status").order("started_at", { ascending: false }).limit(1000),
     ]);
-    for (const response of [tasks, oldest, failures, sources, recentRuns]) if (response.error) throw response.error;
-    const counts = (tasks.data || []).reduce((result: Record<string, number>, task: any) => {
-      result[task.status] = (result[task.status] || 0) + 1;
-      return result;
-    }, {});
+    for (const response of [...statusCounts, oldest, failures, sources, recentRuns]) if (response.error) throw response.error;
+    const counts = Object.fromEntries(statusCounts.filter(item => item.count > 0).map(item => [item.status, item.count])) as Record<string, number>;
     const failuresByProvider = (failures.data || []).reduce((result: Record<string, number>, failure: any) => {
       result[failure.provider] = (result[failure.provider] || 0) + 1;
       return result;

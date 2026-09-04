@@ -2,7 +2,12 @@ name: Sync discovery jobs
 
 on:
   schedule:
+    # GitHub's scheduler has been observed skipping hourly slots for several
+    # hours at a time. Two staggered schedules give each hour two chances;
+    # the dispatcher is idempotent per hour bucket, so a duplicate run only
+    # drains whatever the first one left.
     - cron: "0 * * * *"
+    - cron: "30 * * * *"
   workflow_dispatch:
 
 permissions: {}

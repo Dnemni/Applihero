@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
       durationMs: Date.now() - startedAt,
       sourceDurationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
       requestedSources: requestedSourceIds.length,
-      message: results.length ? undefined : background ? "All followed companies are already within their hourly freshness window." : "No enabled company sources are configured.",
+      message: results.length ? undefined
+        : requestedSourceIds.length ? "Only companies you follow can be rescanned manually; the shared catalog still updates every company hourly."
+        : background ? "All followed companies are already within their hourly freshness window."
+        : "No enabled company sources are configured.",
     });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;

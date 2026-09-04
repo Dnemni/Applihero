@@ -1,10 +1,5 @@
 {
   "crons": [
-    { "path": "/api/cron/discover/dispatch", "schedule": "0 * * * *" },
-    { "path": "/api/cron/discover/worker/1", "schedule": "1 * * * *" },
-    { "path": "/api/cron/discover/worker/2", "schedule": "1 * * * *" },
-    { "path": "/api/cron/discover/worker/3", "schedule": "1 * * * *" },
-    { "path": "/api/cron/discover/worker/4", "schedule": "1 * * * *" },
-    { "path": "/api/cron/discover/finalize", "schedule": "12 * * * *" }
+    { "path": "/api/cron/discover/dispatch", "schedule": "30 6 * * *" }
   ]
 }

@@ -195,4 +195,75 @@ page load. Company recommendations load only when the Companies panel opens.
 
 ## 5. After measurements
 
-See the "Validation" section at the end of this file once the changes land.
+Production build (`next build && next start`) on the same machine and database
+as the baseline, second round so compilation is excluded. `Server-Timing`
+breakdowns are attached to every response.
+
+| Request | Before ms | After ms | Before bytes | After bytes | Returned | totalResults |
+| --- | --- | --- | --- | --- | --- | --- |
+| Matches, limit 50 | 2,749 | 693 | 93,641 | 93,628 | 50 | 204 (was 50) |
+| Matches, limit 100 | 2,522 | 690 | 188,080 | 187,665 | 100 | 204 (was 100) |
+| All roles, limit 50 | 2,014 | 1,284 (fallback) | 126,997 | 77,055 | 50 (was 7) | 464 est. (was 29,763) |
+| All roles, limit 100 | 2,442 | 1,320 (fallback) | 522,490 | 158,257 | 100 (was 32) | 464 est. |
+| All roles, query=engineer | 9,259 (HTTP 500) | 1,247 | 31 | 80,233 | 50 | 541 est. |
+| Sources | 2,441 | 356 | 78,403 | 78,382 | 133 | |
+
+A typical Matches breakdown is `auth 108 ms, profile 135 ms, candidates 207 ms
+(261 rows), cards 191 ms (50 cards)`: four dependent round trips, no matcher
+CPU, no writes. From the Vercel `iad1` region the per-hop latency is lower than
+from the developer machine used here.
+
+"Fallback" marks the All roles path used before the 20260904 migration is
+applied: it reads a 1,000-row newest-first window, filters in memory, and
+estimates the total. With the migration the same request is a single filtered,
+counted query (measured shape: about 350 ms round trip at 30k rows).
+
+### Validation performed
+
+- `npm run test:discovery`: 42 tests pass (location policy, catalog filters,
+  match paging, fit currency, cache, rematch selection, queue, connectors).
+- `npx tsc --noEmit` and `npm run build` pass.
+- Headless Chrome (`scripts/browser-discovery-check.ts`, production build):
+  11/11 checks. First page in about 1.2 s; all 204 matches reached through four
+  "Show more" clicks; no Berlin/Germany/India roles in either view; All roles
+  cards read "Not scored"; company filter for the unfollowed Duolingo returns
+  its 78 catalog roles; page load issues GET requests only.
+- Unfollowed company rescan is refused (`sources: 0`); a followed Roblox rescan
+  completes in about 12 s with 100 verified postings.
+- Filters: `location=Berlin` and `workplace=remote|on-site` operate on the whole
+  catalog; keyword search returns 200.
+- Rematch: the diagnosed account converged its Matches rows in the first run;
+  the long `likely_conflict` tail (about 3,000 rows) drains at 250 rows per
+  finalizer run. `POST /api/discover/rematch` handles 150 rows in 4–9 s.
+- Queue status (`GET /api/cron/discover/status`) returns thresholds and alerts.
+  At validation time it reported one retry task older than 90 minutes and 31
+  sources without a successful scan in six hours, which reflects the sparse
+  GitHub schedule described below rather than a code fault. Task counts are now
+  exact per status; the previous `select("status")` was capped at 1,000 rows.
+
+### Operational follow-ups
+
+1. Apply `supabase/migrations/20260904000000_add_discovery_location_columns.sql`,
+   then run `npm run backfill:discovery-locations` (about 30k rows, upserts of
+   200). The feed switches from the fallback path automatically.
+2. Vercel Hobby cannot run hourly crons. `vercel.json` now holds one daily
+   dispatch; GitHub Actions runs at `:00` and `:30`. True first-party hourly
+   redundancy requires the Pro plan.
+3. Convergence of the rematch tail depends on the finalizer actually running
+   hourly. If GitHub keeps skipping slots, raise `perUserLimit` or trigger
+   `POST /api/discover/rematch` from the client when `staleMatches` is large.
+
+### Policies made explicit
+
+- Matches: score strictly above 50 (no row currently sits at exactly 50).
+- Freshness and ordering use `source_published_at`; rows without it sort last
+  and are excluded by any freshness filter (Matches default: 30 days).
+- Multi-location strings pass if any listed place satisfies the scope.
+- Blank or unrecognized locations fail country and region scope.
+- A remote role with no recognized country is location-agnostic; one that names
+  a country is remote within that country ("Remote - Australia" is not a US
+  match). A bare "City, XX" with a well-known foreign city ("Berlin, DE") is
+  foreign, not the US state with that code.
+- Detail pages (`/api/discover/[id]`) still refresh one job's deterministic fit
+  on open. That is bounded to a single row and outside the feed; it can move to
+  the rematch path later if desired.

@@ -61,6 +61,16 @@ test("remote detection covers workplace type and location text, and lower-case p
   assert.deepEqual(classifyDiscoveryLocation("San Jose, CA").countries, ["US"], "CA after a comma is California, not Canada");
 });
 
+test("well-known foreign cities resolve their country and beat colliding state codes", () => {
+  assert.deepEqual(classifyDiscoveryLocation("Berlin, DE").countries, ["DE"], "Berlin, DE is Germany, not Delaware");
+  assert.deepEqual(classifyDiscoveryLocation("Dover, DE").countries, ["US"]);
+  assert.deepEqual(classifyDiscoveryLocation("London").countries, ["GB"]);
+  assert.deepEqual(classifyDiscoveryLocation("Bengaluru").countries, ["IN"]);
+  assert.deepEqual(classifyDiscoveryLocation("Toronto, ON").countries, ["CA"]);
+  assert.equal(matchesDiscoveryLocation({ location: "Berlin, DE", workplace_type: "hybrid" }, usCountry), false);
+  assert.equal(matchesDiscoveryLocation({ location: "Remote - Berlin", workplace_type: "remote" }, usCountry), false, "remote within Germany is not a US remote role");
+});
+
 test("saved preference rows decode with safe defaults", () => {
   assert.deepEqual(decodeLocationPreferences([]), { preferredCountry: "", preferredRegions: [], locationScope: "country", includeRemote: true });
   assert.deepEqual(decodeLocationPreferences([

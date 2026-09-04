@@ -132,10 +132,27 @@ export interface JobFitAnalysis {
   eligibility: EligibilityAssessment;
 }
 
+export type DiscoveryFitState = "current" | "stale" | "catalog";
+
 export interface DiscoveryJobCard extends Omit<DiscoveryJob, "description_html" | "parsed_requirements"> {
-  description_preview: string;
+  description_preview?: string;
   quickFit: QuickFit;
+  /** `stale` means the stored score predates the current profile, posting, or matcher; `catalog` means the role was never scored for this user. */
+  fitState: DiscoveryFitState;
   application: DiscoveryApplicationState | null;
+}
+
+export interface DiscoveryFeedResponse {
+  jobs: DiscoveryJobCard[];
+  scope: "matches" | "all";
+  totalResults: number;
+  totalIsEstimate?: boolean;
+  strongResults: number;
+  staleMatches: number;
+  offset: number;
+  nextOffset: number | null;
+  hasBackground: boolean;
+  hasSubscriptions: boolean;
 }
 
 export interface DiscoveryApplicationState {

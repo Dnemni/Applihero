@@ -58,6 +58,25 @@ export async function getUserBackground(userId: string, jobId?: string): Promise
   return [data?.resume_text, data?.transcript_text, data?.bio, answersToMatchingContext(answers)].filter(Boolean).join("\n\n");
 }
 
+/**
+ * Loads everything the feed needs to know about the applicant in two parallel
+ * round trips: whether any background exists, the matching text, and the hash
+ * that stored fit rows are validated against.
+ */
+export async function getUserProfileContext(userId: string): Promise<{ hasBackground: boolean; background: string; profileHash: string }> {
+  const [{ data: profile, error }, answers] = await Promise.all([
+    db().from("profiles").select("resume_text, transcript_text, bio").eq("id", userId).maybeSingle(),
+    getUserDiscoveryAnswers(userId),
+  ]);
+  if (error) throw error;
+  const background = [profile?.resume_text, profile?.transcript_text, profile?.bio, answersToMatchingContext(answers)].filter(Boolean).join("\n\n");
+  return {
+    hasBackground: Boolean(profile?.resume_text || profile?.transcript_text || profile?.bio),
+    background,
+    profileHash: hashText(background),
+  };
+}
+
 export async function hasUserBackground(userId: string): Promise<boolean> {
   const { data, error } = await db()
     .from("profiles")
@@ -173,84 +192,6 @@ export async function getUserRecommendedJobs(userId: string, limit = 1_000, opti
   }).slice(0, limit);
 }
 
-export async function getUserRecommendedJobPage(userId: string, options: {
-  limit: number;
-  scope: "matches" | "all";
-  sourceIds?: string[];
-  minimumFitScore?: number;
-  query?: string;
-  company?: string;
-  location?: string;
-  workplace?: string;
-  freshness?: number;
-}): Promise<{ items: Array<{ job: DiscoveryJob; quickFit: any }>; total: number; strong: number }> {
-  const jobFields = [
-    "id", "source_id", "source_job_id", "company_name", "title",
-    "location", "workplace_type", "employment_type", "departments", "source_url", "apply_url",
-    "source_published_at", "source_published_precision", "source_published_source", "source_updated_at",
-    "application_deadline", "discovered_at", "first_seen_at", "last_seen_at", "last_verified_at", "status",
-    "parsed_requirements", "parser_version", "content_hash", "job_sources(provider,company_name,external_key)",
-  ].join(",");
-  const safeTerm = (value: string) => value.replace(/[(),.%]/g, " ").trim();
-  const recommendationRows: any[] = [];
-  const recommendationPageSize = 1_000;
-  while (true) {
-    let query = db().from("user_job_recommendations")
-      .select("discovery_job_id,fit_score,fit_band,eligibility_status")
-      .eq("user_id", userId).eq("active", true)
-      .order("discovery_job_id")
-      .range(recommendationRows.length, recommendationRows.length + recommendationPageSize - 1);
-    if (options.sourceIds?.length) query = query.in("source_id", options.sourceIds);
-    if (options.scope === "matches") query = query.gte("fit_score", options.minimumFitScore ?? 50).neq("fit_band", "likely_conflict").neq("eligibility_status", "conflict");
-    const { data, error } = await query;
-    if (error) throw error;
-    recommendationRows.push(...(data || []));
-    if (!data || data.length < recommendationPageSize) break;
-  }
-
-  const fitByJob = new Map(recommendationRows.map(row => [row.discovery_job_id, row]));
-  const jobIds = Array.from(fitByJob.keys()) as string[];
-  const metadata: any[] = [];
-  const jobIdChunks = Array.from({ length: Math.ceil(jobIds.length / 100) }, (_, index) => jobIds.slice(index * 100, index * 100 + 100));
-  let chunkCursor = 0;
-  await Promise.all(Array.from({ length: Math.min(6, jobIdChunks.length) }, async () => {
-    while (chunkCursor < jobIdChunks.length) {
-      const ids = jobIdChunks[chunkCursor++];
-      let query = db().from("discovery_jobs")
-        .select("id,source_published_at,discovered_at,status,title,company_name,location,workplace_type")
-        .in("id", ids)
-        .eq("status", "open");
-      const search = safeTerm(options.query || "");
-      if (search) query = query.or(`title.ilike.%${search}%,company_name.ilike.%${search}%,description.ilike.%${search}%`);
-      if (options.company) query = query.ilike("company_name", `%${safeTerm(options.company)}%`);
-      if (options.location) query = query.ilike("location", `%${safeTerm(options.location)}%`);
-      if (options.workplace) query = query.eq("workplace_type", options.workplace);
-      if (options.freshness && options.freshness > 0) query = query.gte("source_published_at", new Date(Date.now() - options.freshness * 86_400_000).toISOString());
-      const { data, error } = await query;
-      if (error) throw error;
-      metadata.push(...(data || []));
-    }
-  }));
-  metadata.sort((left, right) => new Date(right.source_published_at || right.discovered_at).getTime() - new Date(left.source_published_at || left.discovered_at).getTime());
-  const selectedIds = metadata.slice(0, options.limit).map(job => job.id);
-  if (!selectedIds.length) return { items: [], total: metadata.length, strong: 0 };
-  const [{ data: jobs, error: jobError }, { data: fits, error: fitError }] = await Promise.all([
-    db().from("discovery_jobs").select(jobFields).in("id", selectedIds),
-    db().from("user_job_recommendations").select("discovery_job_id,quick_fit").eq("user_id", userId).in("discovery_job_id", selectedIds),
-  ]);
-  if (jobError) throw jobError;
-  if (fitError) throw fitError;
-  const jobById = new Map((jobs || []).map((job: any) => [job.id, job]));
-  const quickFitById = new Map((fits || []).map((row: any) => [row.discovery_job_id, row.quick_fit]));
-  const items = selectedIds.flatMap(id => {
-    const job = jobById.get(id) as any;
-    return job ? [{ job: { ...job, description: "", description_html: null } as DiscoveryJob, quickFit: quickFitById.get(id) }] : [];
-  });
-  const visibleJobIds = new Set(metadata.map(job => job.id));
-  const strong = recommendationRows.filter(row => visibleJobIds.has(row.discovery_job_id) && row.fit_score >= 75 && row.fit_band !== "likely_conflict" && row.eligibility_status !== "conflict").length;
-  return { items, total: metadata.length, strong };
-}
-
 export async function getUserApplicationStates(userId: string, discoveryJobIds: string[]) {
   if (!discoveryJobIds.length) return new Map<string, { id: string; status: string; lastTouchedAt: string }>();
   const { data, error } = await db().from("jobs")
@@ -349,4 +290,105 @@ export async function saveMatch(args: {
     result: args.result,
   }, { onConflict: "user_id,discovery_job_id,profile_hash,job_hash,matcher_version" });
   if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// Card-ready feed reads. These never call the matcher: stored fit is served as
+// is and staleness is reported to the caller instead of being repaired inline.
+// ---------------------------------------------------------------------------
+
+/** Columns a list card needs. Descriptions, raw payloads, and parsed requirements stay on the detail route. */
+export const DISCOVERY_CARD_FIELDS = [
+  "id", "source_id", "source_job_id", "company_name", "title",
+  "location", "workplace_type", "employment_type", "departments", "source_url", "apply_url",
+  "source_published_at", "source_published_precision", "source_published_source", "source_updated_at",
+  "application_deadline", "discovered_at", "first_seen_at", "last_seen_at", "last_verified_at", "status",
+  "parser_version", "content_hash", "job_sources(provider,company_name,external_key)",
+].join(",");
+
+export const MATCH_CANDIDATE_CAP = 3_000;
+
+function safeSearchTerm(value: string) {
+  return value.replace(/[(),.%"\\]/g, " ").trim();
+}
+
+/**
+ * One inner-joined query returns every qualifying recommendation for a user as
+ * narrow rows already ordered by the provider's publication date. Predicates
+ * the database can evaluate (score, bands, open status, freshness, company,
+ * workplace, title search) are pushed down; the saved location rule is applied
+ * by the caller because it is not expressible as a single SQL predicate yet.
+ */
+export async function getUserMatchCandidates(userId: string, options: {
+  minimumFitScore: number;
+  freshness?: number;
+  query?: string;
+  company?: string;
+  location?: string;
+  workplace?: string;
+  maxRows?: number;
+}): Promise<import("./feed").MatchCandidate[]> {
+  const rows: any[] = [];
+  const pageSize = 1_000;
+  const maxRows = Math.max(pageSize, Math.min(options.maxRows || MATCH_CANDIDATE_CAP, 10_000));
+  while (rows.length < maxRows) {
+    let query = db().from("user_job_recommendations")
+      .select("discovery_job_id,source_id,fit_score,fit_band,eligibility_status,evaluated_profile_hash:quick_fit->>evaluatedProfileHash,evaluated_matcher_version:quick_fit->>matcherVersion,evaluated_job_hash:quick_fit->>evaluatedJobHash,discovery_jobs!inner(id,source_published_at,discovered_at,location,workplace_type,content_hash)")
+      .eq("user_id", userId).eq("active", true)
+      .gt("fit_score", options.minimumFitScore)
+      .neq("fit_band", "likely_conflict").neq("eligibility_status", "conflict")
+      .eq("discovery_jobs.status", "open")
+      .order("discovery_jobs(source_published_at)", { ascending: false, nullsFirst: false })
+      .order("discovery_job_id", { ascending: true })
+      .range(rows.length, rows.length + pageSize - 1);
+    if (options.freshness && options.freshness > 0) query = query.gte("discovery_jobs.source_published_at", new Date(Date.now() - options.freshness * 86_400_000).toISOString());
+    const search = safeSearchTerm(options.query || "");
+    if (search) query = query.or(`title.ilike.%${search}%,company_name.ilike.%${search}%`, { referencedTable: "discovery_jobs" });
+    if (options.company) query = query.ilike("discovery_jobs.company_name", `%${safeSearchTerm(options.company)}%`);
+    if (options.location) query = query.ilike("discovery_jobs.location", `%${safeSearchTerm(options.location)}%`);
+    if (options.workplace) query = query.ilike("discovery_jobs.workplace_type", options.workplace);
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return rows.flatMap((row: any) => {
+    const job = Array.isArray(row.discovery_jobs) ? row.discovery_jobs[0] : row.discovery_jobs;
+    return job ? [{
+      discovery_job_id: row.discovery_job_id,
+      source_id: row.source_id,
+      fit_score: row.fit_score,
+      fit_band: row.fit_band,
+      eligibility_status: row.eligibility_status,
+      evaluated_profile_hash: row.evaluated_profile_hash,
+      evaluated_matcher_version: row.evaluated_matcher_version,
+      evaluated_job_hash: row.evaluated_job_hash,
+      job,
+    }] : [];
+  });
+}
+
+/** Hydrates one page of match cards (job projection plus stored fit) in a single query, preserving the requested order. */
+export async function getUserMatchCards(userId: string, ids: string[]): Promise<Array<{ job: DiscoveryJob; quickFit: any }>> {
+  if (!ids.length) return [];
+  const { data, error } = await db().from("user_job_recommendations")
+    .select(`discovery_job_id,quick_fit,discovery_jobs!inner(${DISCOVERY_CARD_FIELDS})`)
+    .eq("user_id", userId).in("discovery_job_id", ids);
+  if (error) throw error;
+  const byId = new Map<string, { job: DiscoveryJob; quickFit: any }>();
+  for (const row of data || []) {
+    const job = Array.isArray(row.discovery_jobs) ? row.discovery_jobs[0] : row.discovery_jobs;
+    if (job) byId.set(row.discovery_job_id, { job: { ...job, description: "", description_html: null, parsed_requirements: [] } as DiscoveryJob, quickFit: row.quick_fit });
+  }
+  return ids.flatMap(id => { const item = byId.get(id); return item ? [item] : []; });
+}
+
+export type DiscoveryLocationPreferenceRows = Array<{ question_key: string; normalized_value: string | null }>;
+
+export async function getUserLocationPreferenceRows(userId: string): Promise<DiscoveryLocationPreferenceRows> {
+  const { data, error } = await db().from("user_discovery_answers")
+    .select("question_key, normalized_value").eq("user_id", userId)
+    .in("question_key", ["preference_country", "preference_regions", "preference_remote", "preference_location_scope"]);
+  if (error) throw error;
+  return (data || []) as DiscoveryLocationPreferenceRows;
 }

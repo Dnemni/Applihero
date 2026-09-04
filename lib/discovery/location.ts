@@ -5,6 +5,18 @@ export type DiscoveryLocationPreferences = {
   includeRemote: boolean;
 };
 
+/** Decodes the saved `user_discovery_answers` preference rows into the strict filter's inputs. */
+export function decodeLocationPreferences(rows: Array<{ question_key: string; normalized_value: string | null }>): DiscoveryLocationPreferences {
+  const values = new Map(rows.map(row => [row.question_key, row.normalized_value]));
+  const scope = String(values.get("preference_location_scope") || "country");
+  return {
+    preferredCountry: String(values.get("preference_country") || ""),
+    preferredRegions: String(values.get("preference_regions") || "").split(",").filter(Boolean).map(value => { try { return decodeURIComponent(value); } catch { return value; } }),
+    locationScope: scope === "regions" || scope === "worldwide" ? scope : "country",
+    includeRemote: values.get("preference_remote") !== "no",
+  };
+}
+
 const countryAliases: Record<string, string[]> = {
   US: ["united states", "united states of america", "usa", "u.s.", "u.s.a.", "us"],
   USA: ["united states", "united states of america", "usa", "u.s.", "u.s.a.", "us"],

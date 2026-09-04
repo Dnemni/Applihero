@@ -19,11 +19,15 @@ function sourceErrorMessage(value: unknown): string | null {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireApiUser(request);
+    // Ranking unfollowed companies scores ~120 postings against the profile
+    // (about two seconds of CPU and half a megabyte of parsed requirements).
+    // It is only requested when the Companies panel opens, never on page load.
+    const includeRecommendations = request.nextUrl.searchParams.get("include") === "recommendations";
     const [{ data: sources, error: sourceError }, { data: subscriptions, error: subscriptionError }, background, openJobs] = await Promise.all([
       db().from("job_sources").select("id, provider, external_key, company_name, career_url, enabled, featured, last_sync_completed_at, last_successful_scan_at, next_sync_at, last_sync_error, sync_interval_minutes").eq("enabled", true).order("featured", { ascending: false }).order("company_name"),
       db().from("user_job_source_subscriptions").select("source_id, notify_email, min_fit_score").eq("user_id", user.id).eq("enabled", true),
-      getUserBackground(user.id),
-      getDiscoverySourceRecommendationCandidates(120),
+      includeRecommendations ? getUserBackground(user.id) : Promise.resolve(""),
+      includeRecommendations ? getDiscoverySourceRecommendationCandidates(120) : Promise.resolve([]),
     ]);
     if (sourceError) throw sourceError;
     if (subscriptionError) throw subscriptionError;
@@ -56,7 +60,7 @@ export async function GET(request: NextRequest) {
       scoresBySource.set(job.source_id, Math.max(scoresBySource.get(job.source_id) ?? -1, fit.score));
     }
     const studentFriendly = new Set(["Roblox", "Anduril", "SpaceX", "Databricks", "Figma", "Reddit", "Cloudflare", "Dropbox", "Scale AI", "Waymo"]);
-    const recommendations = visibleSources
+    const recommendations = !includeRecommendations ? undefined : visibleSources
       .filter((source: any) => !source.subscribed)
       .map((source: any) => ({
         sourceId: source.id,
@@ -71,7 +75,7 @@ export async function GET(request: NextRequest) {
       .sort((a: any, b: any) => (b.bestScore ?? -1) - (a.bestScore ?? -1) || b.fallbackRank - a.fallbackRank || a.companyName.localeCompare(b.companyName))
       .slice(0, 6)
       .map(({ fallbackRank: _rank, ...item }: any) => item);
-    return NextResponse.json({ sources: visibleSources, recommendations });
+    return NextResponse.json({ sources: visibleSources, ...(recommendations ? { recommendations } : {}) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load companies" }, { status });

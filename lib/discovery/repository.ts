@@ -392,3 +392,104 @@ export async function getUserLocationPreferenceRows(userId: string): Promise<Dis
   if (error) throw error;
   return (data || []) as DiscoveryLocationPreferenceRows;
 }
+
+// ---------------------------------------------------------------------------
+// Shared catalog paging ("All roles").
+// ---------------------------------------------------------------------------
+
+let locationColumnsSupport: Promise<boolean> | null = null;
+
+/**
+ * The normalized geography columns arrive with the 20260904 migration. Until it
+ * is applied, callers fall back to filtering a bounded window in memory. The
+ * probe runs once per process and is re-run after a negative answer so a
+ * rolling deploy picks the columns up without a restart.
+ */
+export function discoveryJobsSupportLocationColumns(): Promise<boolean> {
+  if (!locationColumnsSupport) {
+    locationColumnsSupport = (async () => {
+      const { error } = await db().from("discovery_jobs").select("location_countries,location_remote").limit(1);
+      if (!error) return true;
+      if (error.code === "42703" || error.code === "PGRST204" || /location_countries/.test(String(error.message))) return false;
+      throw error;
+    })().then(supported => {
+      if (!supported) setTimeout(() => { locationColumnsSupport = null; }, 60_000);
+      return supported;
+    }).catch(error => { locationColumnsSupport = null; throw error; });
+  }
+  return locationColumnsSupport;
+}
+
+export type CatalogJobPage = {
+  items: DiscoveryJob[];
+  total: number;
+  totalIsEstimate: boolean;
+  offset: number;
+  nextOffset: number | null;
+  locationFilteredInDatabase: boolean;
+};
+
+const CATALOG_FALLBACK_WINDOW = 1_000;
+
+/**
+ * One page of the shared catalog with every filter, including the saved
+ * location rule, applied before paging. Cards use the narrow projection; the
+ * exact count costs about 70 ms at 30k rows and keeps "Show more" truthful.
+ */
+export async function getCatalogDiscoveryJobPage(options: {
+  offset: number;
+  limit: number;
+  filters: import("./catalog-filters").CatalogFilterOptions;
+  location: import("./location").DiscoveryLocationPreferences;
+}): Promise<CatalogJobPage> {
+  const { applyCatalogFilterSteps, buildCatalogFilterSteps, buildCatalogLocationSteps } = await import("./catalog-filters");
+  const { matchesDiscoveryLocation } = await import("./location");
+  const limit = Math.max(1, Math.min(options.limit, 100));
+  const offset = Math.max(0, options.offset);
+  const filterSteps = buildCatalogFilterSteps(options.filters);
+  const supportsLocation = await discoveryJobsSupportLocationColumns();
+
+  if (supportsLocation) {
+    let query = db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS, { count: "exact" });
+    query = applyCatalogFilterSteps(query, [...filterSteps, ...buildCatalogLocationSteps(options.location)]);
+    const { data, error, count } = await query
+      .order("source_published_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+    const items = (data || []).map((job: any) => ({ ...job, description: "", description_html: null, parsed_requirements: [] })) as DiscoveryJob[];
+    const total = count ?? offset + items.length;
+    return { items, total, totalIsEstimate: false, offset, nextOffset: offset + items.length < total ? offset + items.length : null, locationFilteredInDatabase: true };
+  }
+
+  // Fallback: page through a bounded newest-first window of narrow rows and
+  // apply the location rule here. Totals are estimates because rows beyond the
+  // window are not inspected.
+  const narrow: any[] = [];
+  const pageSize = 500;
+  while (narrow.length < CATALOG_FALLBACK_WINDOW) {
+    let query = db().from("discovery_jobs").select("id,location,workplace_type,source_published_at");
+    query = applyCatalogFilterSteps(query, filterSteps);
+    const { data, error } = await query
+      .order("source_published_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: true })
+      .range(narrow.length, narrow.length + pageSize - 1);
+    if (error) throw error;
+    narrow.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  const visible = narrow.filter(job => matchesDiscoveryLocation(job, options.location));
+  const pageIds = visible.slice(offset, offset + limit).map(job => job.id);
+  const { data: rows, error: rowError } = pageIds.length
+    ? await db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS).in("id", pageIds)
+    : { data: [], error: null };
+  if (rowError) throw rowError;
+  const byId = new Map((rows || []).map((job: any) => [job.id, { ...job, description: "", description_html: null, parsed_requirements: [] }]));
+  const items = pageIds.flatMap(id => { const job = byId.get(id); return job ? [job as DiscoveryJob] : []; });
+  const exhausted = narrow.length < CATALOG_FALLBACK_WINDOW;
+  return {
+    items, total: visible.length, totalIsEstimate: !exhausted, offset,
+    nextOffset: offset + items.length < visible.length ? offset + items.length : null,
+    locationFilteredInDatabase: false,
+  };
+}

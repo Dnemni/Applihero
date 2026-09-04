@@ -1,6 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { hydrateSourceJob, prepareSourceJob, type NormalizedSourceJob } from "./connectors";
 import type { JobProvider } from "./types";
+import { discoveryJobsSupportLocationColumns } from "./repository";
+import { discoveryLocationColumns } from "./location";
 
 const db = () => {
   if (!supabaseAdmin) throw new Error("Supabase admin client is not configured");
@@ -45,7 +47,9 @@ export async function processDiscoveryEnrichment(limit = 20) {
         job as NormalizedSourceJob,
       ));
       const now = new Date().toISOString();
+      const writeLocationColumns = await discoveryJobsSupportLocationColumns();
       const { error: updateError } = await database.from("discovery_jobs").update({
+        ...(writeLocationColumns ? discoveryLocationColumns(hydrated.location, hydrated.workplace_type) : {}),
         title: hydrated.title,
         description: hydrated.description,
         description_html: hydrated.description_html,

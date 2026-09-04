@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
 import {
-  getCatalogDiscoveryJobs, getUserApplicationStates, getUserLocationPreferenceRows, getUserMatchCandidates,
+  getCatalogDiscoveryJobPage, getUserApplicationStates, getUserLocationPreferenceRows, getUserMatchCandidates,
   getUserMatchCards, getUserProfileContext, getUserSourceIds, hasUserSubscriptions,
 } from "@/lib/discovery/repository";
 import { MATCHER_VERSION } from "@/lib/discovery/matcher";
 import type { DiscoveryFeedResponse, DiscoveryJobCard, QuickFit } from "@/lib/discovery/types";
-import { decodeLocationPreferences, matchesDiscoveryLocation } from "@/lib/discovery/location";
+import { decodeLocationPreferences } from "@/lib/discovery/location";
 import { clampFeedLimit, clampFeedOffset, selectMatchPage } from "@/lib/discovery/feed";
 import { isQuickFitCurrent, MATCH_MINIMUM_SCORE } from "@/lib/discovery/fit-cache";
 import { createRequestTimer } from "@/lib/discovery/timing";
@@ -82,16 +82,20 @@ export async function GET(request: NextRequest) {
         offset: page.offset, nextOffset: page.nextOffset, hasBackground, hasSubscriptions,
       };
     } else {
-      const catalogPage = await timer.time("catalog", () => getCatalogDiscoveryJobs({ limit: Math.min(200, limit * 4), query, company, location, workplace, freshness }), result => `${result.items.length} rows`);
-      const visible = catalogPage.items.filter(job => matchesDiscoveryLocation(job, locationPreferences)).slice(0, limit);
-      const applicationStates = await timer.time("applications", () => getUserApplicationStates(user.id, visible.map(job => job.id)));
-      const jobs: DiscoveryJobCard[] = visible.map(job => {
+      // The catalog is shared and independent of follows. Every filter,
+      // including the saved location rule, is applied before paging so totals
+      // and "Show more" describe the whole catalog rather than one fetched window.
+      const catalogPage = await timer.time("catalog", () => getCatalogDiscoveryJobPage({
+        offset, limit, filters: { query, company, location, workplace, freshness }, location: locationPreferences,
+      }), result => `${result.items.length} rows${result.locationFilteredInDatabase ? "" : " (fallback)"}`);
+      const applicationStates = await timer.time("applications", () => getUserApplicationStates(user.id, catalogPage.items.map(job => job.id)));
+      const jobs: DiscoveryJobCard[] = catalogPage.items.map(job => {
         const { description_html: _html, parsed_requirements: _requirements, description: _description, ...card } = job;
         return { ...card, description: "", quickFit: CATALOG_FIT, fitState: "catalog", application: applicationStates.get(job.id) as DiscoveryJobCard["application"] || null };
       });
       body = {
-        jobs, scope, totalResults: catalogPage.total, totalIsEstimate: true, strongResults: 0, staleMatches: 0,
-        offset: 0, nextOffset: null, hasBackground, hasSubscriptions,
+        jobs, scope, totalResults: catalogPage.total, totalIsEstimate: catalogPage.totalIsEstimate, strongResults: 0, staleMatches: 0,
+        offset: catalogPage.offset, nextOffset: catalogPage.nextOffset, hasBackground, hasSubscriptions,
       };
     }
 

@@ -17,7 +17,8 @@
     "backfill:discovery-fit-cache": "tsx scripts/backfill-discovery-fit-cache.ts",
     "backfill:discovery-parsing": "tsx scripts/backfill-discovery-parsing.ts",
     "diagnose:discovery-read-path": "tsx scripts/diagnose-discovery-read-path.ts",
-    "measure:discovery-requests": "tsx scripts/measure-discovery-requests.ts"
+    "measure:discovery-requests": "tsx scripts/measure-discovery-requests.ts",
+    "backfill:discovery-locations": "tsx scripts/backfill-discovery-locations.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

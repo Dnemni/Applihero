@@ -4,6 +4,8 @@ import { assessDiscoveryEligibility, getDiscoveryApplicantProfile } from "./elig
 import { applyDiscoveryEligibilityGate, buildQuickFit, MATCHER_VERSION } from "./matcher";
 import { hashText } from "./parser";
 import { quickFitEquals } from "./fit-cache";
+import { discoveryLocationColumns } from "./location";
+import { discoveryJobsSupportLocationColumns } from "./repository";
 import { answersToMatchingContext, type DiscoveryAnswer } from "./facts";
 import type { DiscoveryJob, QuickFit } from "./types";
 
@@ -376,6 +378,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
     }
 
     const now = new Date().toISOString();
+    const writeLocationColumns = await discoveryJobsSupportLocationColumns();
     const persistedJobs = Array.from(sourceCatalog.values()).map(job => {
       const { source_published_precision, source_published_source, listing_hash, ...baseJob } = job;
       return {
@@ -383,6 +386,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
         source_id: source.id,
         company_name: source.company_name,
         status: "open",
+        ...(writeLocationColumns ? discoveryLocationColumns(job.location, job.workplace_type) : {}),
         consecutive_misses: 0,
         last_verified_at: now,
         ...(ingestionState ? {

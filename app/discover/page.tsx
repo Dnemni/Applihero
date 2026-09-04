@@ -10,9 +10,9 @@ import {
 import { Header } from "@/components/header";
 import { OnboardingOverlay, type OnboardingStep } from "@/components/onboarding-overlay";
 import { toast } from "@/components/toast";
-import { discoveryFetch } from "@/lib/discovery/client";
+import { discoveryFetch, fetchDiscoveryFeedPage, invalidateDiscoveryFeedCache } from "@/lib/discovery/client";
 import { advanceOnboarding, getOnboardingState, setOnboardingState, shouldShowOnboarding } from "@/lib/onboarding-state";
-import type { DiscoveryJobCard, DiscoveryNotification, DiscoverySource, DiscoverySourceRecommendation, DiscoverySourceSuggestion, EligibilityStatus } from "@/lib/discovery/types";
+import type { DiscoveryFeedResponse, DiscoveryJobCard, DiscoveryNotification, DiscoverySource, DiscoverySourceRecommendation, DiscoverySourceSuggestion, EligibilityStatus } from "@/lib/discovery/types";
 
 const eligibilityStyles: Record<EligibilityStatus, { dot: string; text: string; score: string }> = {
   aligned: { dot: "bg-emerald-500", text: "text-emerald-700", score: "text-emerald-700" },
@@ -20,6 +20,8 @@ const eligibilityStyles: Record<EligibilityStatus, { dot: string; text: string; 
   conflict: { dot: "bg-rose-500", text: "text-rose-700", score: "text-rose-700" },
 };
 const INTERACTIVE_SOURCE_BATCH_SIZE = 6;
+const FEED_PAGE_SIZE = 50;
+type FeedFilters = { query: string; company: string; location: string; workplace: string; freshness: string; scope: "matches" | "all" };
 
 function companyInitials(company: string) {
   return company.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
@@ -51,7 +53,10 @@ function sourceFreshnessLabel(source: DiscoverySource) {
 export default function DiscoverPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<DiscoveryJobCard[]>([]);
-  const [resultSummary, setResultSummary] = useState({ total: 0, strong: 0 });
+  const [resultSummary, setResultSummary] = useState<{ total: number; strong: number; stale: number; nextOffset: number | null; totalIsEstimate: boolean }>({ total: 0, strong: 0, stale: 0, nextOffset: null, totalIsEstimate: false });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [rematching, setRematching] = useState(false);
+  const [recommendationsLoaded, setRecommendationsLoaded] = useState(false);
   const [sources, setSources] = useState<DiscoverySource[]>([]);
   const [recommendedSources, setRecommendedSources] = useState<DiscoverySourceRecommendation[]>([]);
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([]);
@@ -136,31 +141,47 @@ export default function DiscoverPage() {
     },
   ];
 
-  async function loadJobs(overrides?: Partial<{ query: string; company: string; location: string; workplace: string; freshness: string; scope: "matches" | "all" }>, resultLimit = 50) {
+  function currentFilters(overrides?: Partial<FeedFilters>): FeedFilters {
+    return {
+      query: overrides?.query ?? query, company: overrides?.company ?? company, location: overrides?.location ?? location,
+      workplace: overrides?.workplace ?? workplace, freshness: overrides?.freshness ?? freshness,
+      scope: overrides?.scope ?? feedScope,
+    };
+  }
+
+  function applyFeedPage(payload: DiscoveryFeedResponse, append: boolean) {
+    setJobs(current => {
+      if (!append) return payload.jobs || [];
+      const seen = new Set(current.map(job => job.id));
+      return [...current, ...(payload.jobs || []).filter(job => !seen.has(job.id))];
+    });
+    setResultSummary({
+      total: Number(payload.totalResults || 0), strong: Number(payload.strongResults || 0), stale: Number(payload.staleMatches || 0),
+      nextOffset: payload.nextOffset ?? null, totalIsEstimate: Boolean(payload.totalIsEstimate),
+    });
+    setHasBackground(Boolean(payload.hasBackground));
+    setHasSubscriptions(Boolean(payload.hasSubscriptions));
+  }
+
+  /**
+   * Loads the first page for the given filters, or appends the next page when
+   * `append` is set. Pages come through a bounded client cache keyed by user,
+   * scope, filters, and offset, so navigating back is instant and identical
+   * concurrent requests are deduplicated.
+   */
+  async function loadJobs(overrides?: Partial<FeedFilters>, options: { append?: boolean } = {}) {
     const requestId = ++jobRequestSequence.current;
-    if (jobs.length === 0) setLoading(true);
+    const append = Boolean(options.append && resultSummary.nextOffset !== null);
+    if (append) setLoadingMore(true);
+    else if (jobs.length === 0) setLoading(true);
     else setRefreshing(true);
     setError("");
     try {
-      const filters = {
-        query: overrides?.query ?? query, company: overrides?.company ?? company, location: overrides?.location ?? location,
-        workplace: overrides?.workplace ?? workplace, freshness: overrides?.freshness ?? freshness,
-        scope: overrides?.scope ?? feedScope,
-      };
-      const params = new URLSearchParams();
-      if (filters.query.trim()) params.set("query", filters.query.trim());
-      if (filters.company.trim()) params.set("company", filters.company.trim());
-      if (filters.location.trim()) params.set("location", filters.location.trim());
-      if (filters.workplace) params.set("workplace", filters.workplace);
-      if (filters.freshness) params.set("freshness", filters.freshness);
-      params.set("scope", filters.scope);
-      params.set("limit", String(resultLimit));
-      const response = await discoveryFetch(`/api/discover?${params}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load jobs");
+      const filters = currentFilters(overrides);
+      const payload = await fetchDiscoveryFeedPage({ ...filters, offset: append ? resultSummary.nextOffset || 0 : 0, limit: FEED_PAGE_SIZE });
       if (requestId !== jobRequestSequence.current) return;
-      setJobs(payload.jobs || []); setResultSummary({ total: Number(payload.totalResults || 0), strong: Number(payload.strongResults || 0) }); setHasBackground(Boolean(payload.hasBackground));
-      setHasSubscriptions(Boolean(payload.hasSubscriptions));
+      applyFeedPage(payload, append);
+      return payload;
     } catch (caught) {
       if (requestId !== jobRequestSequence.current) return;
       const message = caught instanceof Error ? caught.message : "Unable to load jobs";
@@ -170,8 +191,23 @@ export default function DiscoverPage() {
       if (requestId === jobRequestSequence.current) {
         setLoading(false);
         setRefreshing(false);
+        setLoadingMore(false);
       }
     }
+  }
+
+  /** Bounded, user-initiated refresh of stored scores; the feed itself never recomputes. */
+  async function refreshMatchScores() {
+    setRematching(true);
+    try {
+      const response = await discoveryFetch("/api/discover/rematch", { method: "POST", body: JSON.stringify({ limit: 200 }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to refresh match scores");
+      invalidateDiscoveryFeedCache();
+      await loadJobs();
+      toast.success("Match scores refreshed", payload.remaining ? `${payload.updated} updated; ${payload.remaining} more will finish in the background.` : `${payload.updated} score${payload.updated === 1 ? "" : "s"} updated.`);
+    } catch (caught) { toast.error("Could not refresh scores", caught instanceof Error ? caught.message : "Try again shortly"); }
+    finally { setRematching(false); }
   }
 
   async function loadCompanionData() {
@@ -184,8 +220,6 @@ export default function DiscoverPage() {
       if (!sourceResponse.ok) throw new Error(sourcePayload.error || "Unable to load companies");
       const loadedSources = sourcePayload.sources || [];
       setSources(loadedSources); setSourceError("");
-      setRecommendedSources(sourcePayload.recommendations || []);
-      setSelectedRecommendations((sourcePayload.recommendations || []).slice(0, 4).map((item: DiscoverySourceRecommendation) => item.sourceId));
       if (notificationResponse.ok) setNotifications(notificationPayload.notifications || []);
       if (preferenceResponse.ok) {
         const preferencePayload = await preferenceResponse.json();
@@ -197,21 +231,30 @@ export default function DiscoverPage() {
   }
 
   useEffect(() => {
-    void loadJobs();
-    // Keep the first feed response focused on the saved job list. The drawer,
-    // notification panel, and preferences can hydrate once the browser is idle.
-    const idle = window.setTimeout(() => {
-      void loadCompanionData();
-    }, 0);
+    // The feed request gets the connection to itself. Companies, notifications,
+    // and preferences load once the first page has arrived (or failed).
+    void loadJobs().finally(() => { void loadCompanionData(); });
     shouldShowOnboarding("discover").then(async should => {
       if (!should) return;
       const state = await getOnboardingState();
       setOnboardingStep(Math.min(state?.step || 0, onboardingSteps.length - 1));
       setShowOnboarding(true);
     });
-    return () => window.clearTimeout(idle);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+
+  useEffect(() => {
+    // Ranking unfollowed companies scores postings against the profile on the
+    // server; ask for it only when the panel that shows it is open.
+    if (!showCompanies || recommendationsLoaded) return;
+    setRecommendationsLoaded(true);
+    discoveryFetch("/api/discover/sources?include=recommendations").then(async response => {
+      const payload = await response.json();
+      if (!response.ok) return;
+      setRecommendedSources(payload.recommendations || []);
+      setSelectedRecommendations((payload.recommendations || []).slice(0, 4).map((item: DiscoverySourceRecommendation) => item.sourceId));
+    }).catch(() => { /* recommendations are optional */ });
+  }, [showCompanies, recommendationsLoaded]);
 
   useEffect(() => {
     if (!jobs.length) return;
@@ -301,6 +344,7 @@ export default function DiscoverPage() {
       const discovered = batches.reduce((sum, batch) => sum + Number(batch.discovered || 0), 0);
       const failures = batches.flatMap(batch => batch.failures || []);
       toast.success(failures.length ? "Company refresh finished with issues" : "Followed companies refreshed", discovered ? `${discovered} new role${discovered === 1 ? "" : "s"} found.` : `Checked ${sourceIds.length} followed ${sourceIds.length === 1 ? "company" : "companies"}.`);
+      invalidateDiscoveryFeedCache();
       await Promise.all([loadJobs(), loadCompanionData()]);
     } catch (caught) { toast.error("Refresh failed", caught instanceof Error ? caught.message : "Unable to refresh jobs"); }
     finally { setSyncing(false); setSyncProgress(null); }
@@ -315,6 +359,7 @@ export default function DiscoverPage() {
       });
       const payload = await response.json();
       if (!response.ok || payload.failures?.length) throw new Error(payload.failures?.[0]?.error || payload.error || "Unable to scan company");
+      invalidateDiscoveryFeedCache();
       await Promise.all([loadJobs(), loadCompanionData()]);
       const result = payload.results?.[0];
       if (result && result.matched === 0) {
@@ -340,6 +385,7 @@ export default function DiscoverPage() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update company");
+      invalidateDiscoveryFeedCache();
       if (nextSubscribed) {
         toast.success("Company followed", "Scanning for eligible roles in the background.");
         void scanFollowedSource(source.id);
@@ -427,9 +473,12 @@ export default function DiscoverPage() {
       if (!response.ok) throw new Error(payload.error || "Unable to save alerts");
       setPreferences(payload.preferences);
       toast.success("Discovery preferences updated");
-      // A broader scope should take effect immediately instead of making the
-      // user wait for the next scheduled source check to see those roles.
-      if (refreshMatches) await handleSync();
+      // Location preferences are applied by the feed query itself, and any
+      // answer change is recomputed by a bounded rematch of stored scores. A
+      // preference save never rescans every followed company.
+      invalidateDiscoveryFeedCache();
+      if (refreshMatches) await refreshMatchScores();
+      else await loadJobs();
     } catch (caught) { toast.error("Could not save alerts", caught instanceof Error ? caught.message : "Try again"); }
     finally { setSavingPreferences(false); }
   }
@@ -443,7 +492,7 @@ export default function DiscoverPage() {
             <p className="text-sm font-semibold text-indigo-600">Discover</p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Your job discovery feed</h1>
             <p className="mt-2 text-sm text-gray-600">
-              {resultSummary.total} open {resultSummary.total === 1 ? "role" : "roles"}{resultSummary.strong ? ` · ${resultSummary.strong} strong ${resultSummary.strong === 1 ? "match" : "matches"}` : ""}
+              {resultSummary.totalIsEstimate ? "About " : ""}{resultSummary.total.toLocaleString()} open {resultSummary.total === 1 ? "role" : "roles"}{resultSummary.strong ? ` · ${resultSummary.strong} strong ${resultSummary.strong === 1 ? "match" : "matches"}` : ""}
               {followedSources.length ? ` · ${followedSources.length} ${followedSources.length === 1 ? "company" : "companies"} monitored` : ""}
             </p>
           </div>
@@ -483,12 +532,13 @@ export default function DiscoverPage() {
         </form>
 
         <section id="discovery-results" className="mt-7 overflow-hidden rounded-[1.5rem] bg-white shadow-sm ring-1 ring-gray-200/80">
-          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-7"><h2 className="font-semibold">Latest openings</h2><span className="inline-flex items-center gap-2 text-xs text-gray-500">{refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-500" />}{resultSummary.total} results</span></div>
+          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-7"><h2 className="font-semibold">Latest openings</h2><span className="inline-flex items-center gap-2 text-xs text-gray-500">{refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-500" />}{jobs.length < resultSummary.total ? `${jobs.length} of ${resultSummary.totalIsEstimate ? "about " : ""}${resultSummary.total.toLocaleString()}` : resultSummary.total.toLocaleString()} results</span></div>
+          {feedScope === "matches" && resultSummary.stale > 0 && !loading && <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50/70 px-5 py-3 text-sm text-amber-950 sm:px-7"><RefreshCw className={`h-4 w-4 shrink-0 ${rematching ? "animate-spin" : ""}`} /><span>{resultSummary.stale} match {resultSummary.stale === 1 ? "score predates" : "scores predate"} your latest profile or posting changes. Scores refresh hourly in the background.</span><button type="button" onClick={() => void refreshMatchScores()} disabled={rematching} className="ml-auto shrink-0 rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 transition hover:border-amber-400 disabled:opacity-60">{rematching ? "Refreshing…" : "Refresh scores now"}</button></div>}
           {loading ? <div className="py-24 text-center"><RefreshCw className="mx-auto h-6 w-6 animate-spin text-indigo-500" /><p className="mt-3 text-sm text-gray-500">Loading jobs…</p></div>
           : error ? <div className="py-20 text-center text-rose-700"><CircleAlert className="mx-auto h-7 w-7" /><p className="mt-3 font-semibold">Could not load jobs</p><p className="mt-1 text-sm">{error}</p></div>
           : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" />{activeSourceCount ? <><p className="mt-4 font-semibold">The catalog is updating</p><p className="mt-1 text-sm text-gray-500">{activeSourceCount} source{activeSourceCount === 1 ? " is" : "s are"} queued or updating. New matching roles will appear here automatically.</p></> : failedSourceCount ? <><p className="mt-4 font-semibold">A company check needs another try</p><p className="mt-1 text-sm text-gray-500">Your existing matches are safe. Open Companies to see which source is retrying.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Review companies</button></> : <><p className="mt-4 font-semibold">No roles match this view</p><p className="mt-1 text-sm text-gray-500">Try broadening filters, viewing all roles, or adjusting your location preferences.</p></>}</div>
           : <div>{jobs.map(job => {
-            const eligibility = eligibilityStyles[job.quickFit.eligibility.status];
+            const eligibility = job.fitState === "catalog" ? { dot: "bg-gray-300", text: "text-gray-500", score: "text-gray-500" } : eligibilityStyles[job.quickFit.eligibility.status];
             const reason = job.quickFit.eligibility.reasons[0] || job.quickFit.reasons[0];
             const matchReason = job.quickFit.reasons.find(item => item !== reason);
             return <article key={job.id} onClick={() => router.push(`/discover/${job.id}`)} className="group relative cursor-pointer border-b border-gray-200 px-5 py-6 transition last:border-0 hover:bg-amber-50/50 sm:px-7 sm:py-7">
@@ -503,12 +553,12 @@ export default function DiscoverPage() {
                   {matchReason && <p className="mt-2 max-w-3xl text-xs leading-5 text-gray-500"><span className="font-semibold text-gray-700">Why this matches:</span> {matchReason}</p>}
                 </div>
                 <div className="flex items-center justify-between gap-3 sm:min-w-[126px] sm:flex-col sm:items-end">
-                  <div className="text-left sm:text-right"><p className={`text-2xl font-bold tabular-nums ${eligibility.score}`}>{job.quickFit.score ?? "—"}<span className="text-xs font-medium text-gray-400">/100</span></p><p className={`mt-1 text-[11px] font-semibold ${eligibility.text}`}>{job.quickFit.eligibility.label}</p></div>
+                  <div className="text-left sm:text-right">{job.fitState === "catalog" ? <><p className="text-sm font-semibold text-gray-500">Not scored</p><p className="mt-1 text-[11px] text-gray-400">Open to review fit</p></> : <><p className={`text-2xl font-bold tabular-nums ${eligibility.score}`}>{job.quickFit.score ?? "—"}<span className="text-xs font-medium text-gray-400">/100</span></p><p className={`mt-1 text-[11px] font-semibold ${eligibility.text}`}>{job.fitState === "stale" ? "Score updating" : job.quickFit.eligibility.label}</p></>}</div>
                   <div className="flex items-center gap-2 sm:mt-5"><a href={job.source_url} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition hover:border-indigo-300 hover:text-indigo-600" aria-label="Open official posting"><ExternalLink className="h-4 w-4" /></a><span className="inline-flex h-9 items-center gap-1 rounded-full bg-gray-950 px-4 text-xs font-semibold text-white transition group-hover:bg-indigo-600">{job.application ? "Continue application" : "Review job"} <ArrowRight className="h-3.5 w-3.5" /></span></div>
                 </div>
               </div>
             </article>;
-          })}{jobs.length < resultSummary.total && <div className="border-t border-gray-200 px-5 py-4 text-center"><button type="button" onClick={() => void loadJobs(undefined, Math.min(resultSummary.total, jobs.length + 50))} className="rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:border-indigo-300 hover:text-indigo-700">Show 50 more</button></div>}</div>}
+          })}{resultSummary.nextOffset !== null && <div className="border-t border-gray-200 px-5 py-4 text-center"><button type="button" onClick={() => void loadJobs(undefined, { append: true })} disabled={loadingMore} className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60">{loadingMore && <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-500" />}{loadingMore ? "Loading more…" : `Show ${Math.min(FEED_PAGE_SIZE, Math.max(0, resultSummary.total - jobs.length)) || FEED_PAGE_SIZE} more`}</button><p className="mt-2 text-[11px] text-gray-400">Showing {jobs.length} of {resultSummary.totalIsEstimate ? "about " : ""}{resultSummary.total.toLocaleString()}</p></div>}</div>}
         </section>
         <p className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-500"><Check className="h-3.5 w-3.5 text-emerald-600" />Jobs are deduplicated and verified against their employer source.</p>
       </main>

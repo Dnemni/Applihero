@@ -3,6 +3,7 @@ import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
 import { getCachedMatch, getUserApplicationState, getUserBackground, getUserRecommendedJob, hasUserBackground, saveRecommendationFit } from "@/lib/discovery/repository";
 import { buildQuickFit, MATCHER_VERSION } from "@/lib/discovery/matcher";
 import { hashText } from "@/lib/discovery/parser";
+import { quickFitEquals } from "@/lib/discovery/fit-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       evaluatedProfileHash: profileHash,
       evaluatedJobHash: recommendation.job.content_hash,
     };
-    if (JSON.stringify(quickFit) !== JSON.stringify(recommendation.quickFit)) await saveRecommendationFit(user.id, params.id, quickFit);
+    if (!quickFitEquals(quickFit, recommendation.quickFit)) await saveRecommendationFit(user.id, params.id, quickFit);
     const analysis = analysisIsCurrent ? await getCachedMatch({
       userId: user.id,
       jobId: recommendation.job.id,

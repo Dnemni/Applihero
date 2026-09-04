@@ -28,3 +28,6 @@ Thumbs.db
 
 # Generated TypeScript incremental build state
 tsconfig.tsbuildinfo
+
+# Supabase CLI scratch state
+supabase/.temp

@@ -126,7 +126,12 @@ export function buildDiscoveryQuestions(job: DiscoveryJob): DiscoveryQuestion[] 
 }
 
 export function answersToMatchingContext(answers: DiscoveryAnswer[]) {
-  const freshAnswers = answers.filter(answer => isDiscoveryAnswerFresh(answer));
+  // The result is hashed to decide whether stored fit is still current. Sort
+  // deterministically so a worker reading answers without ORDER BY and a route
+  // reading them by provided_at produce the same hash for the same facts.
+  const freshAnswers = answers
+    .filter(answer => isDiscoveryAnswerFresh(answer))
+    .sort((left, right) => left.question_key.localeCompare(right.question_key) || left.provided_at.localeCompare(right.provided_at));
   if (!freshAnswers.length) return "";
   return [
     "APPLIHERO CONFIRMED ELIGIBILITY FACTS (user supplied):",

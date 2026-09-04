@@ -3,6 +3,7 @@ import { fetchSourceJobsWithMeta, hydrateSourceJob, prepareSourceJob, type Norma
 import { assessDiscoveryEligibility, getDiscoveryApplicantProfile } from "./eligibility";
 import { applyDiscoveryEligibilityGate, buildQuickFit, MATCHER_VERSION } from "./matcher";
 import { hashText } from "./parser";
+import { quickFitEquals } from "./fit-cache";
 import { answersToMatchingContext, type DiscoveryAnswer } from "./facts";
 import type { DiscoveryJob, QuickFit } from "./types";
 
@@ -476,7 +477,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
           existing.fit_score !== row.fit_score ||
           existing.fit_band !== row.fit_band ||
           existing.eligibility_status !== row.eligibility_status ||
-          JSON.stringify(existing.quick_fit) !== JSON.stringify(row.quick_fit);
+          !quickFitEquals(existing.quick_fit, row.quick_fit);
       });
       if (changedRecommendations.length) {
         await upsertInChunks("user_job_recommendations", changedRecommendations, { onConflict: "user_id,discovery_job_id" });

@@ -27,14 +27,15 @@ async function ensureCurrentParsing(job: DiscoveryJob): Promise<DiscoveryJob> {
   return { ...job, parsed_requirements: parsedRequirements, parser_version: REQUIREMENTS_PARSER_VERSION, content_hash: contentHash };
 }
 
-export async function getDiscoveryJob(id: string): Promise<DiscoveryJob | null> {
+export async function getDiscoveryJob(id: string, options: { ensureParsing?: boolean } = {}): Promise<DiscoveryJob | null> {
   const { data, error } = await db()
     .from("discovery_jobs")
     .select("*, job_sources(provider, company_name, external_key)")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
-  return data ? ensureCurrentParsing(data as DiscoveryJob) : null;
+  if (!data) return null;
+  return options.ensureParsing === false ? data as DiscoveryJob : ensureCurrentParsing(data as DiscoveryJob);
 }
 
 export async function getUserDiscoveryAnswers(userId: string, jobId?: string): Promise<DiscoveryAnswer[]> {
@@ -241,6 +242,17 @@ export async function getUserRecommendedJob(userId: string, jobId: string): Prom
   if (!data) return null;
   const job = Array.isArray(data.discovery_jobs) ? data.discovery_jobs[0] : data.discovery_jobs;
   return job ? { job: await ensureCurrentParsing(job as DiscoveryJob), quickFit: data.quick_fit } : null;
+}
+
+/** Stored recommendation metadata without requiring it to be active. */
+export async function getUserRecommendationFit(userId: string, jobId: string): Promise<{ quick_fit: any; source_id: string; active: boolean } | null> {
+  const { data, error } = await db().from("user_job_recommendations")
+    .select("quick_fit,source_id,active")
+    .eq("user_id", userId)
+    .eq("discovery_job_id", jobId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
 }
 
 export async function getUserSourceIds(userId: string): Promise<string[]> {

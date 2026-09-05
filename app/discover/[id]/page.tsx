@@ -25,7 +25,7 @@ import {
 import { Header } from "@/components/header";
 import { OnboardingOverlay, type OnboardingStep } from "@/components/onboarding-overlay";
 import { toast } from "@/components/toast";
-import { discoveryFetch } from "@/lib/discovery/client";
+import { discoveryFetch, invalidateDiscoveryFeedCache } from "@/lib/discovery/client";
 import { advanceOnboarding, getOnboardingState, setOnboardingState, shouldShowOnboarding } from "@/lib/onboarding-state";
 import type { DiscoveryApplicationState, DiscoveryJob, EligibilityStatus, FitBand, JobFitAnalysis, QuickFit, RequirementFit, RequirementMatchStatus } from "@/lib/discovery/types";
 
@@ -96,6 +96,8 @@ export default function DiscoverJobPage() {
   const router = useRouter();
   const [job, setJob] = useState<DiscoveryJob | null>(null);
   const [quickFit, setQuickFit] = useState<QuickFit | null>(null);
+  const [fitState, setFitState] = useState<"current" | "stale" | "catalog">("catalog");
+  const [hasRecommendation, setHasRecommendation] = useState(false);
   const [analysis, setAnalysis] = useState<JobFitAnalysis | null>(null);
   const [application, setApplication] = useState<DiscoveryApplicationState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -172,21 +174,30 @@ export default function DiscoverJobPage() {
     async function load() {
       setLoading(true);
       try {
-        const [response, questionResponse] = await Promise.all([
-          discoveryFetch(`/api/discover/${params.id}`),
-          discoveryFetch(`/api/discover/${params.id}/questions`),
-        ]);
+        const response = await discoveryFetch(`/api/discover/${params.id}`);
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "Unable to load job");
         setJob(payload.job);
         setQuickFit(payload.quickFit);
+        setFitState(payload.fitState || "catalog");
+        setHasRecommendation(Boolean(payload.hasRecommendation));
         setAnalysis(payload.analysis || null);
         setApplication(payload.application || null);
-        if (!payload.analysis && payload.hasBackground) void runAnalysis();
-        if (questionResponse.ok) {
+        if (payload.hasRecommendation) {
+          const questionResponse = await discoveryFetch(`/api/discover/${params.id}/questions`);
+          if (questionResponse.ok) {
           const questionPayload = await questionResponse.json();
           setQuestions(questionPayload.questions || []);
           setAnswers(questionPayload.answers || []);
+          }
+        }
+        if (payload.fitState === "stale" && payload.recommendationActive) {
+          void discoveryFetch("/api/discover/rematch", {
+            method: "POST",
+            body: JSON.stringify({ jobIds: [params.id], limit: 1 }),
+          }).then(response => {
+            if (response.ok) invalidateDiscoveryFeedCache();
+          }).catch(() => {});
         }
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "Unable to load job";
@@ -311,10 +322,10 @@ export default function DiscoverJobPage() {
             <section id="fit-analysis-section" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div><p className="text-sm font-semibold text-indigo-600">Eligibility and evidence</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">How this role lines up</h2></div>
-                {fit && <div className={`shrink-0 rounded-lg border px-3 py-2 text-right ${bandStyles[fit.band]}`}><p className="text-[11px] font-semibold uppercase tracking-wide">{fit.label}</p><p className="text-2xl font-bold">{fit.score ?? "—"}<span className="text-xs font-medium opacity-60">/100</span></p></div>}
+                {fit && <div className={`shrink-0 rounded-lg border px-3 py-2 text-right ${bandStyles[fit.band]}`}><p className="text-[11px] font-semibold uppercase tracking-wide">{fitState === "catalog" ? "Preliminary" : fitState === "stale" ? "Score updating" : fit.label}</p><p className="text-2xl font-bold">{fit.score ?? "—"}<span className="text-xs font-medium opacity-60">/100</span></p></div>}
               </div>
 
-              {eligibility && <div id="eligibility-card" className={`mt-5 flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between ${eligibilityStyles[eligibility.status]}`}><div><p className="text-sm font-semibold">{eligibility.label}</p><p className="mt-1 text-sm leading-6 opacity-80">{eligibility.reasons[0]}</p></div>{eligibility.status === "unknown" && questions.length > 0 && <button onClick={() => setShowQuestions(true)} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-950 px-3.5 py-2 text-xs font-semibold text-white"><MessageCircle className="h-4 w-4" />Answer {questions.length === 1 ? "question" : `${questions.length} questions`}</button>}</div>}
+              {eligibility && <div id="eligibility-card" className={`mt-5 flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between ${eligibilityStyles[eligibility.status]}`}><div><p className="text-sm font-semibold">{eligibility.label}</p><p className="mt-1 text-sm leading-6 opacity-80">{eligibility.reasons[0]}</p></div>{hasRecommendation && eligibility.status === "unknown" && questions.length > 0 && <button onClick={() => setShowQuestions(true)} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-950 px-3.5 py-2 text-xs font-semibold text-white"><MessageCircle className="h-4 w-4" />Answer {questions.length === 1 ? "question" : `${questions.length} questions`}</button>}</div>}
 
               {analyzing ? (
                 <div className="mt-5 flex items-center gap-3 rounded-lg bg-indigo-50 p-4 text-sm text-indigo-800"><Loader2 className="h-5 w-5 animate-spin" />Checking requirements against your supplied background...</div>
@@ -376,7 +387,7 @@ export default function DiscoverJobPage() {
           </aside>
         </div>
       </main>
-      {showQuestions && <div className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[2px]" onClick={() => setShowQuestions(false)}>
+      {hasRecommendation && showQuestions && <div className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[2px]" onClick={() => setShowQuestions(false)}>
         <aside id="eligibility-question-panel" className="ml-auto flex h-full w-full max-w-md flex-col bg-[#fffdf8] shadow-2xl" onClick={event => event.stopPropagation()}>
           <div className="flex items-start justify-between border-b border-slate-200 px-5 py-5"><div><p className="text-xs font-semibold text-indigo-600">Improve this match</p><h2 className="mt-1 text-xl font-semibold">A few things only you know</h2><p className="mt-1 text-xs leading-5 text-slate-500">Unknown answers never count against you.</p></div><button onClick={() => setShowQuestions(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
           <div className="flex-1 space-y-5 overflow-y-auto p-5">

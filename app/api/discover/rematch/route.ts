@@ -16,7 +16,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const requested = Number(body?.limit);
     const limit = Number.isInteger(requested) && requested > 0 ? Math.min(requested, REMATCH_MAX_LIMIT) : REMATCH_DEFAULT_LIMIT;
-    return NextResponse.json(await rematchUserRecommendations(user.id, { limit }));
+    const jobIds: string[] | undefined = Array.isArray(body?.jobIds)
+      ? Array.from(new Set<string>(body.jobIds.filter((value: unknown): value is string => typeof value === "string"))).slice(0, REMATCH_MAX_LIMIT)
+      : undefined;
+    return NextResponse.json(await rematchUserRecommendations(user.id, { limit, jobIds }));
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 500;
     console.error("Discovery rematch error:", error);

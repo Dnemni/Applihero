@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectRematchRows, type RematchRow } from "../rematch";
+import { evaluateDisplayFit, selectRematchRows, type RematchRow } from "../rematch";
 
 const currency = { matcherVersion: "v1", profileHash: "profile" };
 function row(id: string, quickFit: Partial<RematchRow["quick_fit"]> | null, fitScore: number | null = 70, contentHash = "job"): RematchRow {
@@ -29,4 +29,15 @@ test("rematch selects only stale rows, highest stored score first, within the li
   assert.equal(all.selected.length, 6);
   assert.equal(all.remaining, 0);
   assert.ok(!all.selected.some(item => item.discovery_job_id === "current"));
+});
+
+test("display fit always carries deterministic currency and the discovery eligibility gate", () => {
+  const fit = evaluateDisplayFit({
+    id: "job", source_id: "source", title: "Senior Product Manager", company_name: "Example",
+    description: "Five years of professional experience required.", content_hash: "job-hash", parsed_requirements: [],
+  } as any, { background: "Bachelor student graduating in 2028", profileHash: "profile-hash" });
+  assert.equal(fit.matcherVersion, "eligibility-evidence-v28");
+  assert.equal(fit.evaluatedProfileHash, "profile-hash");
+  assert.equal(fit.evaluatedJobHash, "job-hash");
+  assert.equal(typeof fit.discoveryEligible, "boolean");
 });

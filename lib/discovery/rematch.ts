@@ -55,6 +55,19 @@ export function evaluateRematchRow(row: RematchRow, context: { background: strin
   }, assessDiscoveryEligibility(job as any, context.applicant));
 }
 
+/** Canonical display fit used by detail and mutation routes. It never writes. */
+export function evaluateDisplayFit(job: DiscoveryJob, context: { background: string; profileHash: string }) {
+  return evaluateRematchRow({
+    discovery_job_id: job.id,
+    source_id: job.source_id,
+    fit_score: null,
+    fit_band: "needs_information",
+    eligibility_status: "unknown",
+    quick_fit: null,
+    job,
+  }, { ...context, applicant: getDiscoveryApplicantProfile(context.background) });
+}
+
 const REMATCH_JOB_FIELDS = "id,source_id,source_job_id,company_name,title,description,location,workplace_type,employment_type,departments,source_url,apply_url,source_published_at,source_updated_at,application_deadline,discovered_at,last_verified_at,status,parsed_requirements,parser_version,content_hash";
 const STALE_SCAN_ROWS = 1_000;
 
@@ -85,7 +98,7 @@ const NARROW_FIELDS = "discovery_job_id,source_id,fit_score,fit_band,eligibility
  * descriptions, and every write goes through the same canonical comparison as
  * the sync worker, so unchanged scores are left untouched.
  */
-export async function rematchUserRecommendations(userId: string, options: { limit?: number } = {}): Promise<RematchSummary> {
+export async function rematchUserRecommendations(userId: string, options: { limit?: number; jobIds?: string[] } = {}): Promise<RematchSummary> {
   const started = Date.now();
   const limit = Math.max(1, Math.min(options.limit || REMATCH_DEFAULT_LIMIT, REMATCH_MAX_LIMIT));
   const database = db();
@@ -93,15 +106,23 @@ export async function rematchUserRecommendations(userId: string, options: { limi
   const currency = { matcherVersion: MATCHER_VERSION, profileHash };
   const staleFilter = `quick_fit->>evaluatedProfileHash.neq.${profileHash},quick_fit->>matcherVersion.neq.${MATCHER_VERSION},quick_fit->>evaluatedProfileHash.is.null,quick_fit->>discoveryEligible.is.null`;
 
-  const [known, knownCount, drift] = await Promise.all([
-    database.from("user_job_recommendations").select(NARROW_FIELDS)
+  const requestedJobIds = Array.from(new Set((options.jobIds || []).filter(Boolean))).slice(0, REMATCH_MAX_LIMIT);
+  let knownQuery = database.from("user_job_recommendations").select(NARROW_FIELDS)
       .eq("user_id", userId).eq("active", true).eq("discovery_jobs.status", "open").or(staleFilter)
-      .order("fit_score", { ascending: false, nullsFirst: false }).order("discovery_job_id").limit(limit),
-    database.from("user_job_recommendations").select("discovery_job_id,discovery_jobs!inner(id)", { count: "exact", head: true })
-      .eq("user_id", userId).eq("active", true).eq("discovery_jobs.status", "open").or(staleFilter),
-    database.from("user_job_recommendations").select(NARROW_FIELDS)
-      .eq("user_id", userId).eq("active", true).eq("discovery_jobs.status", "open")
-      .order("last_evaluated_at", { ascending: true }).limit(STALE_SCAN_ROWS),
+      .order("fit_score", { ascending: false, nullsFirst: false }).order("discovery_job_id").limit(limit);
+  let countQuery = database.from("user_job_recommendations").select("discovery_job_id,discovery_jobs!inner(id)", { count: "exact", head: true })
+      .eq("user_id", userId).eq("active", true).eq("discovery_jobs.status", "open").or(staleFilter);
+  if (requestedJobIds.length) {
+    knownQuery = knownQuery.in("discovery_job_id", requestedJobIds);
+    countQuery = countQuery.in("discovery_job_id", requestedJobIds);
+  }
+  const driftQuery = requestedJobIds.length
+    ? database.from("user_job_recommendations").select(NARROW_FIELDS).eq("user_id", userId).eq("active", true).eq("discovery_jobs.status", "open").in("discovery_job_id", requestedJobIds)
+    : database.from("user_job_recommendations").select(NARROW_FIELDS).eq("user_id", userId).eq("active", true).eq("discovery_jobs.status", "open").order("last_evaluated_at", { ascending: true }).limit(STALE_SCAN_ROWS);
+  const [known, knownCount, drift] = await Promise.all([
+    knownQuery,
+    countQuery,
+    driftQuery,
   ]);
   for (const response of [known, knownCount, drift]) if (response.error) throw response.error;
   const candidates = new Map<string, NarrowRow>();

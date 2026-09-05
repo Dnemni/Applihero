@@ -20,6 +20,8 @@ async function main() {
   const { createClient } = await import("@supabase/supabase-js");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const admin = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+  // Never use the default/global sign-out scope for this synthetic session:
+  // it would revoke the user's real browser and device refresh tokens too.
   const { data: link, error: linkError } = await admin.auth.admin.generateLink({ type: "magiclink", email });
   if (linkError) throw linkError;
   const anon = createClient(url, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -39,22 +41,25 @@ async function main() {
     "/api/discover/notifications",
     "/api/discover/preferences",
   ];
-  console.log(`Base: ${base}\n`);
-  console.log(["ms".padStart(7), "status", "bytes".padStart(9), "jobs".padStart(5), "total".padStart(6), " path"].join(" "));
-  for (let round = 0; round < repeat; round += 1) {
-    for (const path of paths) {
-      const started = performance.now();
-      const response = await fetch(base + path, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-      const text = await response.text();
-      const ms = performance.now() - started;
-      let jobs = "", total = "";
-      try { const json = JSON.parse(text); if (Array.isArray(json.jobs)) { jobs = String(json.jobs.length); total = String(json.totalResults ?? ""); } if (Array.isArray(json.sources)) jobs = `${json.sources.length}s`; } catch {}
-      const timing = response.headers.get("server-timing");
-      console.log([ms.toFixed(0).padStart(7), String(response.status).padStart(6), String(Buffer.byteLength(text)).padStart(9), jobs.padStart(5), total.padStart(6), " " + path + (timing ? `\n${" ".repeat(38)}server-timing: ${timing}` : "")].join(" "));
+  try {
+    console.log(`Base: ${base}\n`);
+    console.log(["ms".padStart(7), "status", "bytes".padStart(9), "jobs".padStart(5), "total".padStart(6), " path"].join(" "));
+    for (let round = 0; round < repeat; round += 1) {
+      for (const path of paths) {
+        const started = performance.now();
+        const response = await fetch(base + path, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+        const text = await response.text();
+        const ms = performance.now() - started;
+        let jobs = "", total = "";
+        try { const json = JSON.parse(text); if (Array.isArray(json.jobs)) { jobs = String(json.jobs.length); total = String(json.totalResults ?? ""); } if (Array.isArray(json.sources)) jobs = `${json.sources.length}s`; } catch {}
+        const timing = response.headers.get("server-timing");
+        console.log([ms.toFixed(0).padStart(7), String(response.status).padStart(6), String(Buffer.byteLength(text)).padStart(9), jobs.padStart(5), total.padStart(6), " " + path + (timing ? `\n${" ".repeat(38)}server-timing: ${timing}` : "")].join(" "));
+      }
+      if (repeat > 1) console.log(`-- round ${round + 1} done`);
     }
-    if (repeat > 1) console.log(`-- round ${round + 1} done`);
+  } finally {
+    await anon.auth.signOut({ scope: "local" }).catch(() => {});
   }
-  await anon.auth.signOut().catch(() => {});
 }
 
-main().catch(error => { console.error(error); process.exit(1); });
+main().catch(error => { console.error(error); process.exitCode = 1; });

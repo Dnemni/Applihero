@@ -25,6 +25,8 @@ async function main() {
   const { createClient } = await import("@supabase/supabase-js");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const admin = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+  // Never use the default/global sign-out scope for this synthetic session:
+  // it would revoke the user's real browser and device refresh tokens too.
   const { data: link, error: linkError } = await admin.auth.admin.generateLink({ type: "magiclink", email });
   if (linkError) throw linkError;
   const anon = createClient(url, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -34,7 +36,9 @@ async function main() {
   const storageKey = `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;
 
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || "chrome", headless: true }).catch(() => chromium.launch({ headless: true }));
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+  try {
+  browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || "chrome", headless: true }).catch(() => chromium.launch({ headless: true }));
   const page = await browser.newPage({ viewport: { width: 1360, height: 900 } });
   await page.addInitScript(([key, value]) => { window.localStorage.setItem(key, value); }, [storageKey, JSON.stringify(session)] as [string, string]);
   const requests: Array<{ method: string; url: string; status: number; ms: number }> = [];
@@ -109,10 +113,13 @@ async function main() {
   const failed = requests.filter(item => item.status >= 400);
   record("no failed API requests", failed.length === 0, failed.length ? failed.map(item => `${item.status} ${item.url}`).join(", ") : `${feedRequests.length} feed requests, all 2xx`);
 
-  await browser.close();
   const failures = checks.filter(check => !check.ok);
   console.log(`\n${checks.length - failures.length}/${checks.length} checks passed`);
-  if (failures.length) process.exit(1);
+  if (failures.length) process.exitCode = 1;
+  } finally {
+    await browser?.close().catch(() => {});
+    await anon.auth.signOut({ scope: "local" }).catch(() => {});
+  }
 }
 
-main().catch(error => { console.error(error); process.exit(1); });
+main().catch(error => { console.error(error); process.exitCode = 1; });

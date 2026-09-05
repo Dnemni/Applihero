@@ -73,7 +73,7 @@ async function main() {
   let page = 0;
   while (true) {
     const { data } = await timed(`matches: recommendation page ${page}`, () => db.from("user_job_recommendations")
-      .select("discovery_job_id,fit_score,fit_band,eligibility_status,source_id,active,last_evaluated_at")
+      .select("discovery_job_id,fit_score,fit_band,eligibility_status,source_id,active,last_evaluated_at,evaluated_job_hash:quick_fit->>evaluatedJobHash,evaluated_profile_hash:quick_fit->>evaluatedProfileHash")
       .eq("user_id", userId).eq("active", true).in("source_id", sourceIds)
       .gte("fit_score", 50).neq("fit_band", "likely_conflict").neq("eligibility_status", "conflict")
       .order("discovery_job_id").range(recRows.length, recRows.length + 999));
@@ -111,7 +111,7 @@ async function main() {
   const allRecs: any[] = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await timed(`all recommendations page ${from / 1000}`, () => db.from("user_job_recommendations")
-      .select("discovery_job_id,source_id,fit_score,fit_band,eligibility_status,active,last_evaluated_at,quick_fit->matcherVersion,quick_fit->evaluatedProfileHash,quick_fit->evaluatedJobHash,quick_fit->discoveryEligible")
+      .select("discovery_job_id,source_id,fit_score,fit_band,eligibility_status,active,last_evaluated_at,matcher_version:quick_fit->>matcherVersion,evaluated_profile_hash:quick_fit->>evaluatedProfileHash,evaluated_job_hash:quick_fit->>evaluatedJobHash,discovery_eligible:quick_fit->>discoveryEligible")
       .eq("user_id", userId).range(from, from + 999));
     allRecs.push(...(data as any[]));
     if ((data as any[]).length < 1000) break;
@@ -128,8 +128,8 @@ async function main() {
     likelyConflict: rows.filter(r => r.fit_band === "likely_conflict").length,
     eligibilityConflict: rows.filter(r => r.eligibility_status === "conflict").length,
     bands: rows.reduce((acc: Record<string, number>, r) => { acc[r.fit_band] = (acc[r.fit_band] || 0) + 1; return acc; }, {}),
-    matcherVersions: rows.reduce((acc: Record<string, number>, r) => { const v = String(r.matcherVersion ?? "null"); acc[v] = (acc[v] || 0) + 1; return acc; }, {}),
-    discoveryEligibleMissing: rows.filter(r => typeof r.discoveryEligible !== "boolean").length,
+    matcherVersions: rows.reduce((acc: Record<string, number>, r) => { const v = String(r.matcher_version ?? "null"); acc[v] = (acc[v] || 0) + 1; return acc; }, {}),
+    discoveryEligibleMissing: rows.filter(r => r.discovery_eligible !== "true" && r.discovery_eligible !== "false").length,
   });
   const { hashText } = await import("../lib/discovery/parser");
   const { answersToMatchingContext } = await import("../lib/discovery/facts");
@@ -137,12 +137,12 @@ async function main() {
   const { data: answers } = await db.from("user_discovery_answers").select("*").eq("user_id", userId).eq("reuse_approved", true).order("provided_at", { ascending: false });
   const bg = [ (background as any)?.resume_text, (background as any)?.transcript_text, (background as any)?.bio, answersToMatchingContext(answers || []) ].filter(Boolean).join("\n\n");
   const profileHash = hashText(bg);
-  const staleProfile = allRecs.filter(r => r.active && r.evaluatedProfileHash !== profileHash).length;
-  const staleVersion = allRecs.filter(r => r.active && r.matcherVersion !== MATCHER_VERSION).length;
+  const staleProfile = allRecs.filter(r => r.active && r.evaluated_profile_hash !== profileHash).length;
+  const staleVersion = allRecs.filter(r => r.active && r.matcher_version !== MATCHER_VERSION).length;
   // Job hash staleness: compare against current content_hash for the active qualifying set.
   const { data: hashRows } = await timed("content_hash for qualifying jobs", () => db.from("discovery_jobs").select("id,content_hash,status,source_published_at,location,workplace_type").in("id", jobIds.slice(0, 1000)));
   const hashById = new Map((hashRows as any[]).map(r => [r.id, r]));
-  const staleJob = recRows.filter(r => { const j = hashById.get(r.discovery_job_id); return j && j.content_hash !== r.evaluatedJobHash; }).length;
+  const staleJob = recRows.filter(r => { const j = hashById.get(r.discovery_job_id); return j && j.content_hash !== r.evaluated_job_hash; }).length;
 
   // Location filter effect on the qualifying set
   const { matchesDiscoveryLocation } = await import("../lib/discovery/location");

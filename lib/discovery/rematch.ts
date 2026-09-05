@@ -68,7 +68,7 @@ export function evaluateDisplayFit(job: DiscoveryJob, context: { background: str
   }, { ...context, applicant: getDiscoveryApplicantProfile(context.background) });
 }
 
-const REMATCH_JOB_FIELDS = "id,source_id,source_job_id,company_name,title,description,location,workplace_type,employment_type,departments,source_url,apply_url,source_published_at,source_updated_at,application_deadline,discovered_at,last_verified_at,status,parsed_requirements,parser_version,content_hash";
+export const REMATCH_JOB_FIELDS = "id,source_id,source_job_id,company_name,title,description,location,workplace_type,employment_type,departments,source_url,apply_url,source_published_at,source_updated_at,application_deadline,discovered_at,last_verified_at,status,parsed_requirements,parser_version,content_hash";
 const STALE_SCAN_ROWS = 1_000;
 
 type NarrowRow = { discovery_job_id: string; source_id: string; fit_score: number | null; fit_band: string; eligibility_status: string; quick_fit: Partial<QuickFit> | null; job: { id: string; content_hash: string } };
@@ -177,6 +177,45 @@ export async function rematchUserRecommendations(userId: string, options: { limi
     candidates: staleTotal, evaluated, updated: updates.length, remaining: Math.max(0, staleTotal - evaluated),
     durationMs: Date.now() - started,
   };
+}
+
+/**
+ * Makes an existing source useful immediately after follow without touching
+ * the provider. This is deliberately notification-free: alerts begin with
+ * jobs observed by later catalog scans, not with this historical seed.
+ */
+export async function seedUserSourceRecommendations(userId: string, sourceId: string, limit = 100) {
+  const database = db();
+  const boundedLimit = Math.max(1, Math.min(limit, 200));
+  const [{ background, profileHash }, { data: jobs, error }] = await Promise.all([
+    getUserProfileContext(userId),
+    database.from("discovery_jobs").select(REMATCH_JOB_FIELDS)
+      .eq("source_id", sourceId).eq("status", "open")
+      .order("source_published_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: true }).limit(boundedLimit),
+  ]);
+  if (error) throw error;
+  const now = new Date().toISOString();
+  const rows = (jobs || []).map((job: DiscoveryJob) => {
+    const quickFit = evaluateDisplayFit(job, { background, profileHash });
+    return {
+      user_id: userId,
+      source_id: sourceId,
+      discovery_job_id: job.id,
+      fit_score: quickFit.score,
+      fit_band: quickFit.band,
+      eligibility_status: quickFit.eligibility.status,
+      quick_fit: quickFit,
+      active: true,
+      last_evaluated_at: now,
+    };
+  });
+  for (let index = 0; index < rows.length; index += 50) {
+    const { error: writeError } = await database.from("user_job_recommendations")
+      .upsert(rows.slice(index, index + 50), { onConflict: "user_id,discovery_job_id" });
+    if (writeError) throw writeError;
+  }
+  return rows.length;
 }
 
 /**

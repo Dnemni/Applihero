@@ -5,8 +5,10 @@ import { supabaseAdmin } from "@/lib/supabase/client";
 import { buildQuickFit } from "@/lib/discovery/matcher";
 import { getDiscoverySourceRecommendationCandidates, getUserBackground } from "@/lib/discovery/repository";
 import { assessDiscoveryEligibility, getDiscoveryApplicantProfile } from "@/lib/discovery/eligibility";
+import { seedUserSourceRecommendations } from "@/lib/discovery/rematch";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 const db = () => supabaseAdmin as any;
 
 function sourceErrorMessage(value: unknown): string | null {
@@ -133,7 +135,15 @@ export async function POST(request: NextRequest) {
       subscribed_at: new Date().toISOString(),
     }, { onConflict: "user_id,source_id" });
     if (error) throw error;
-    return NextResponse.json({ sourceId, subscribed: true });
+    let seeded = 0;
+    try {
+      seeded = await seedUserSourceRecommendations(user.id, sourceId, 100);
+    } catch (seedError) {
+      // The follow itself is authoritative. A temporary seed failure must not
+      // make the UI roll it back; the next shared scan will converge the rows.
+      console.error(`Discovery follow seed failed for ${sourceId}:`, seedError);
+    }
+    return NextResponse.json({ sourceId, subscribed: true, seeded });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 400;
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to follow company" }, { status });

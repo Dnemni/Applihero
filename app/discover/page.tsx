@@ -91,7 +91,6 @@ export default function DiscoverPage() {
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [preferences, setPreferences] = useState({ email_enabled: false, digest_frequency_minutes: 1440, minimum_fit_score: 45, preferred_country: "", preferred_regions: [] as string[], location_scope: "country" as "regions" | "country" | "worldwide", include_remote: true });
   const [preferredRegionsInput, setPreferredRegionsInput] = useState("");
-  const [sourceScanNotice, setSourceScanNotice] = useState<{ company: string; careerUrl: string | null; fallbackImported: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const jobRequestSequence = useRef(0);
@@ -123,7 +122,7 @@ export default function DiscoverPage() {
     },
     {
       title: "Follow, scan, and set alerts",
-      description: "Following a company starts an initial scan automatically. This panel also controls digest frequency and the minimum match score required for an email alert. You can add or remove companies at any time.",
+      description: "Following a company adds its current catalog matches without starting a provider scan. This panel also controls digest frequency and the minimum match score required for an email alert.",
       targetId: "companies-monitor-panel",
       position: "left",
       action: { label: "Continue", onClick: () => setShowCompanies(false) },
@@ -352,30 +351,6 @@ export default function DiscoverPage() {
     finally { setSyncing(false); setSyncProgress(null); }
   }
 
-  async function scanFollowedSource(sourceId: string) {
-    setSyncing(true);
-    try {
-      const response = await discoveryFetch("/api/discover/sync", {
-        method: "POST",
-        body: JSON.stringify({ sourceId }),
-      });
-      const payload = await response.json();
-      if (!response.ok || payload.failures?.length) throw new Error(payload.failures?.[0]?.error || payload.error || "Unable to scan company");
-      invalidateDiscoveryFeedCache();
-      await Promise.all([loadJobs(), loadCompanionData()]);
-      const result = payload.results?.[0];
-      if (result && result.matched === 0) {
-        setSourceScanNotice({ company: result.company, careerUrl: result.careerUrl || null, fallbackImported: result.fallbackImported || 0 });
-        toast.info("No current matches", `${result.company} is being monitored. ${result.fallbackImported || 0} recent roles were saved for reference.`);
-      } else {
-        setSourceScanNotice(null);
-        toast.success("Company ready", payload.discovered ? `${payload.discovered} relevant role${payload.discovered === 1 ? "" : "s"} added.` : "Matching roles are already in your feed.");
-      }
-    } catch (caught) {
-      toast.error("Company scan failed", caught instanceof Error ? caught.message : "The company is followed; try scanning again shortly.");
-    } finally { setSyncing(false); }
-  }
-
   async function toggleSource(source: DiscoverySource) {
     const nextSubscribed = !source.subscribed;
     setSources(items => items.map(item => item.id === source.id ? { ...item, subscribed: nextSubscribed } : item));
@@ -388,12 +363,8 @@ export default function DiscoverPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update company");
       invalidateDiscoveryFeedCache();
-      if (nextSubscribed) {
-        toast.success("Company followed", "Scanning for eligible roles in the background.");
-        void scanFollowedSource(source.id);
-      } else {
-        await Promise.all([loadCompanionData(), loadJobs()]);
-      }
+      toast.success(nextSubscribed ? "Company followed" : "Company unfollowed", nextSubscribed ? "Current catalog matches are ready; alerts start with the next regular scan." : "This company will no longer appear in Matches or alerts.");
+      await Promise.all([loadCompanionData(), loadJobs()]);
     } catch (caught) {
       setSources(items => items.map(item => item.id === source.id ? { ...item, subscribed: source.subscribed } : item));
       toast.error("Company update failed", caught instanceof Error ? caught.message : "Unable to update company");
@@ -423,7 +394,8 @@ export default function DiscoverPage() {
       toast.success("Watch list approved", `${selectedRecommendations.length} companies are now being monitored.`);
       await loadCompanionData();
       setSelectedRecommendations([]);
-      void handleSync();
+      invalidateDiscoveryFeedCache();
+      await loadJobs();
     } catch (caught) {
       toast.error("Could not update watch list", caught instanceof Error ? caught.message : "Try again shortly");
     } finally {
@@ -447,9 +419,9 @@ export default function DiscoverPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to follow company");
       setCompanyName(""); setManualCareerUrl(""); setShowManualCareerUrl(false); setCompanyDiscoveryFailed(false); setSourceSuggestion(null);
-      toast.success("Company added", "AppliHero is scanning for relevant roles now, then hourly.");
-      await loadCompanionData();
-      void scanFollowedSource(payload.sourceId);
+      toast.success("Company followed", payload.seeded ? `${payload.seeded} current catalog roles were checked for matches.` : "Alerts start with the next regular catalog scan.");
+      invalidateDiscoveryFeedCache();
+      await Promise.all([loadCompanionData(), loadJobs()]);
     } catch (caught) { toast.error("Could not follow company", caught instanceof Error ? caught.message : "Try again shortly"); }
     finally { setSavingSource(false); }
   }
@@ -571,7 +543,6 @@ export default function DiscoverPage() {
           <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5"><div><h2 className="text-xl font-bold">Company alerts</h2><p className="mt-1 text-sm text-gray-500">The catalog scans every company. Follow only employers you want in alerts and available for a manual rescan.</p></div><button onClick={() => setShowCompanies(false)} className="rounded-full p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button></div>
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {sourceError && <p className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{sourceError}</p>}
-            {sourceScanNotice && <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950">No current {sourceScanNotice.company} roles match your profile</p><p className="mt-1 text-xs leading-5 text-amber-900/75">We’ll keep checking. {sourceScanNotice.fallbackImported ? `${sourceScanNotice.fallbackImported} of the newest roles were saved to the shared catalog.` : "There were no recent roles available to save."}</p><div className="mt-3 flex flex-wrap gap-3">{sourceScanNotice.careerUrl && <a href={sourceScanNotice.careerUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-700 hover:underline">Browse official careers <ExternalLink className="ml-1 inline h-3 w-3" /></a>}<a href="/dashboard/new" className="text-xs font-semibold text-indigo-700 hover:underline">Import a job link</a></div></div>}
             <div className="rounded-2xl border border-gray-200 bg-white p-4">
               <div className="flex items-center justify-between"><div><p className="text-sm font-semibold">Email digest</p><p className="mt-0.5 text-xs text-gray-500">Only new matches at or above your threshold.</p></div><button onClick={() => { const next = { ...preferences, email_enabled: !preferences.email_enabled }; setPreferences(next); void savePreferences(next); }} disabled={savingPreferences} className={`relative h-6 w-11 rounded-full transition ${preferences.email_enabled ? "bg-indigo-600" : "bg-gray-300"}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${preferences.email_enabled ? "left-6" : "left-1"}`} /></button></div>
               <div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-gray-600">Frequency<select value={preferences.digest_frequency_minutes < 60 ? 60 : preferences.digest_frequency_minutes} onChange={event => { const next = { ...preferences, digest_frequency_minutes: Number(event.target.value) }; setPreferences(next); void savePreferences(next); }} className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"><option value={60}>Hourly</option><option value={360}>Every 6 hours</option><option value={1440}>Daily</option><option value={10080}>Weekly</option></select></label><label className="text-xs font-semibold text-gray-600">Minimum fit<select value={preferences.minimum_fit_score} onChange={event => { const next = { ...preferences, minimum_fit_score: Number(event.target.value) }; setPreferences(next); void savePreferences(next); }} className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm"><option value={45}>45 · Potential</option><option value={60}>60 · Good</option><option value={75}>75 · Strong</option></select></label></div>

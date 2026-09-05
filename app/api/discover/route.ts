@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
 import {
   DiscoveryQueryTimeoutError, getCatalogDiscoveryJobPage, getUserApplicationStates, getUserLocationPreferenceRows, getUserMatchCandidates,
-  getUserMatchCards, getUserProfileContext, getUserSourceIds, hasUserSubscriptions,
+  getUserMatchCards, getUserProfileContext, getUserSourceIds, hasUserBackground, hasUserSubscriptions,
 } from "@/lib/discovery/repository";
 import { MATCHER_VERSION } from "@/lib/discovery/matcher";
 import type { DiscoveryFeedResponse, DiscoveryJobCard, QuickFit } from "@/lib/discovery/types";
@@ -44,16 +44,15 @@ export async function GET(request: NextRequest) {
     const offset = clampFeedOffset(params.get("offset"));
     const user = await timer.time("auth", () => requireApiUser(request));
 
-    const [{ hasBackground, profileHash }, hasSubscriptions, sourceIds, locationRows] = await timer.time("profile", () => Promise.all([
-      getUserProfileContext(user.id),
-      hasUserSubscriptions(user.id),
-      getUserSourceIds(user.id),
-      getUserLocationPreferenceRows(user.id),
-    ]));
-    const locationPreferences = decodeLocationPreferences(locationRows);
-
     let body: DiscoveryFeedResponse;
     if (scope === "matches") {
+      const [{ hasBackground, profileHash }, sourceIds, locationRows] = await timer.time("profile", () => Promise.all([
+        getUserProfileContext(user.id),
+        getUserSourceIds(user.id),
+        getUserLocationPreferenceRows(user.id),
+      ]));
+      const hasSubscriptions = sourceIds.length > 0;
+      const locationPreferences = decodeLocationPreferences(locationRows);
       // Matches default to the last 30 days of provider publication dates; an
       // explicit freshness=0 asks for every qualifying open role.
       const matchFreshness = rawFreshness === null ? 30 : freshness;
@@ -84,6 +83,15 @@ export async function GET(request: NextRequest) {
         offset: page.offset, nextOffset: page.nextOffset, totalIsEstimate: candidates.truncated, hasBackground, hasSubscriptions,
       };
     } else {
+      // All roles is unscored and worldwide by default, so avoid loading the
+      // profile text, reusable answers, subscriptions list, and location rows
+      // that only the Matches path needs.
+      const [hasBackground, hasSubscriptions, locationRows] = await timer.time("profile", () => Promise.all([
+        hasUserBackground(user.id),
+        hasUserSubscriptions(user.id),
+        useSavedLocation ? getUserLocationPreferenceRows(user.id) : Promise.resolve([]),
+      ]));
+      const locationPreferences = decodeLocationPreferences(locationRows);
       // The catalog is shared and independent of follows. Every filter,
       // including the saved location rule, is applied before paging so totals
       // and "Show more" describe the whole catalog rather than one fetched window.

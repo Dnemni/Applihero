@@ -318,7 +318,12 @@ export const DISCOVERY_CARD_FIELDS = [
   "parser_version", "content_hash", "job_sources(provider,company_name,external_key)",
 ].join(",");
 
-export const MATCH_CANDIDATE_CAP = 3_000;
+export const MATCH_CANDIDATE_CAP = 5_000;
+
+export type MatchCandidateResult = {
+  rows: import("./feed").MatchCandidate[];
+  truncated: boolean;
+};
 
 function safeSearchTerm(value: string) {
   return value.replace(/[(),.%"\\]/g, " ").trim();
@@ -333,17 +338,22 @@ function safeSearchTerm(value: string) {
  */
 export async function getUserMatchCandidates(userId: string, options: {
   minimumFitScore: number;
+  sourceIds?: string[];
   freshness?: number;
   query?: string;
   company?: string;
   location?: string;
   workplace?: string;
   maxRows?: number;
-}): Promise<import("./feed").MatchCandidate[]> {
+}): Promise<MatchCandidateResult> {
+  if (options.sourceIds && options.sourceIds.length === 0) return { rows: [], truncated: false };
   const rows: any[] = [];
   const pageSize = 1_000;
   const maxRows = Math.max(pageSize, Math.min(options.maxRows || MATCH_CANDIDATE_CAP, 10_000));
-  while (rows.length < maxRows) {
+  // Read one sentinel row past the cap so callers can distinguish an exact
+  // total from a bounded safety result without an extra count query.
+  while (rows.length <= maxRows) {
+    const requestSize = Math.min(pageSize, maxRows + 1 - rows.length);
     let query = db().from("user_job_recommendations")
       .select("discovery_job_id,source_id,fit_score,fit_band,eligibility_status,evaluated_profile_hash:quick_fit->>evaluatedProfileHash,evaluated_matcher_version:quick_fit->>matcherVersion,evaluated_job_hash:quick_fit->>evaluatedJobHash,discovery_jobs!inner(id,source_published_at,discovered_at,location,workplace_type,content_hash)")
       .eq("user_id", userId).eq("active", true)
@@ -352,7 +362,8 @@ export async function getUserMatchCandidates(userId: string, options: {
       .eq("discovery_jobs.status", "open")
       .order("discovery_jobs(source_published_at)", { ascending: false, nullsFirst: false })
       .order("discovery_job_id", { ascending: true })
-      .range(rows.length, rows.length + pageSize - 1);
+      .range(rows.length, rows.length + requestSize - 1);
+    if (options.sourceIds) query = query.in("source_id", options.sourceIds);
     if (options.freshness && options.freshness > 0) query = query.gte("discovery_jobs.source_published_at", new Date(Date.now() - options.freshness * 86_400_000).toISOString());
     const search = safeSearchTerm(options.query || "");
     if (search) query = query.or(`title.ilike.%${search}%,company_name.ilike.%${search}%`, { referencedTable: "discovery_jobs" });
@@ -362,9 +373,10 @@ export async function getUserMatchCandidates(userId: string, options: {
     const { data, error } = await query;
     if (error) throw error;
     rows.push(...(data || []));
-    if (!data || data.length < pageSize) break;
+    if (!data || data.length < requestSize) break;
   }
-  return rows.flatMap((row: any) => {
+  const truncated = rows.length > maxRows;
+  const candidates = rows.slice(0, maxRows).flatMap((row: any) => {
     const job = Array.isArray(row.discovery_jobs) ? row.discovery_jobs[0] : row.discovery_jobs;
     return job ? [{
       discovery_job_id: row.discovery_job_id,
@@ -378,6 +390,7 @@ export async function getUserMatchCandidates(userId: string, options: {
       job,
     }] : [];
   });
+  return { rows: candidates, truncated };
 }
 
 /** Hydrates one page of match cards (job projection plus stored fit) in a single query, preserving the requested order. */

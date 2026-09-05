@@ -58,10 +58,11 @@ export async function GET(request: NextRequest) {
       // explicit freshness=0 asks for every qualifying open role.
       const matchFreshness = rawFreshness === null ? 30 : freshness;
       const candidates = await timer.time("candidates", () => getUserMatchCandidates(user.id, {
-        minimumFitScore: MATCH_MINIMUM_SCORE, freshness: matchFreshness, query, company, location, workplace,
-      }), rows => `${rows.length} rows`);
-      const page = selectMatchPage(candidates, {
-        sourceIds: new Set(sourceIds), location: locationPreferences, offset, limit,
+        minimumFitScore: MATCH_MINIMUM_SCORE, sourceIds, freshness: matchFreshness, query, company, location, workplace,
+      }), result => `${result.rows.length} rows${result.truncated ? " (capped)" : ""}`);
+      if (candidates.truncated) console.warn(`Discovery Matches candidate cap reached for user ${user.id}`);
+      const page = selectMatchPage(candidates.rows, {
+        location: locationPreferences, offset, limit,
         currency: { matcherVersion: MATCHER_VERSION, profileHash },
       });
       const [items, applicationStates] = await timer.time("cards", () => Promise.all([
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
       });
       body = {
         jobs, scope, totalResults: page.total, strongResults: page.strong, staleMatches: page.stale,
-        offset: page.offset, nextOffset: page.nextOffset, hasBackground, hasSubscriptions,
+        offset: page.offset, nextOffset: page.nextOffset, totalIsEstimate: candidates.truncated, hasBackground, hasSubscriptions,
       };
     } else {
       // The catalog is shared and independent of follows. Every filter,

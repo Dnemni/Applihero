@@ -6,12 +6,12 @@ config({ path: ".env.local" });
 /**
  * Drives the Discover page in headless Chrome as a signed-in user and checks
  * the behaviors that regressed in September 2026: every match is reachable
- * through "Show more", All roles pages the shared catalog without scoring,
- * the saved US preference excludes foreign roles, and no page load issues
- * write requests. A short-lived session is minted through the service role's
+ * through "Show more", All roles exposes the complete shared catalog, catalog
+ * detail pages open without a recommendation row, saved location is opt-in in
+ * that view, and no page load issues write requests. A short-lived session is minted through the service role's
  * admin API and injected into the browser; the token is never printed.
  *
- * Usage: npx tsx scripts/browser-discovery-check.ts --email you@example.com [--base http://localhost:3000] [--shots /tmp/discover]
+ * Usage: npx tsx scripts/browser-discovery-check.ts --email you@example.com [--base http://localhost:3000] [--company Duolingo] [--follow-company Duolingo] [--ensure-unfollowed] [--shots /tmp/discover]
  * Requires Playwright (devDependency) and Google Chrome or `npx playwright install chromium`.
  */
 type Check = { name: string; ok: boolean; detail: string };
@@ -86,12 +86,24 @@ async function main() {
   const allFirst = await cards().count();
   const allHeader = await page.locator("#discover-overview p.text-sm.text-gray-600").innerText();
   record("all roles renders a full page", allFirst >= 50, `${allFirst} cards; header: ${allHeader.trim()}`);
+  const allTotal = Number((allHeader.match(/([\d,]+) open/)?.[1] || "0").replace(/,/g, ""));
+  record("all roles exposes the complete catalog", allTotal > 30_000, `${allTotal.toLocaleString()} open roles`);
   const allText = await page.locator("#discovery-results").innerText();
   record("all roles cards are unscored, not conflicts", /Not scored/.test(allText) && !/\/100/.test(allText), "no /100 scores in catalog view");
-  record("all roles respects US preference", !/berlin|germany|bangalore|hyderabad/i.test(allText), "no foreign on-site roles in first page");
   await page.getByRole("button", { name: /^Show \d+ more/ }).click();
   await page.waitForFunction((previous) => document.querySelectorAll("#discovery-results article").length > previous, allFirst, { timeout: 30_000 });
   record("all roles pages", (await cards().count()) > allFirst, `${await cards().count()} cards after one more page`);
+
+  await page.getByLabel("Only my location").check();
+  await page.waitForFunction((previous) => {
+    const text = document.querySelector("#discover-overview p.text-sm.text-gray-600")?.textContent || "";
+    return text !== previous && !document.body.innerText.includes("Loading jobs…");
+  }, allHeader, { timeout: 60_000 });
+  const locatedHeader = await page.locator("#discover-overview p.text-sm.text-gray-600").innerText();
+  const locatedTotal = Number((locatedHeader.match(/([\d,]+) open/)?.[1] || "0").replace(/,/g, ""));
+  record("saved location is an explicit All roles filter", locatedTotal > 0 && locatedTotal < allTotal, `${locatedTotal.toLocaleString()} location-filtered vs ${allTotal.toLocaleString()} worldwide`);
+  await page.getByLabel("Only my location").uncheck();
+  await page.waitForFunction((expected) => (document.querySelector("#discover-overview p.text-sm.text-gray-600")?.textContent || "").includes(Number(expected).toLocaleString()), allTotal, { timeout: 60_000 });
   await shot("03-all-roles");
 
   const unfollowed = arg("company", "");
@@ -103,10 +115,61 @@ async function main() {
     const companyText = await page.locator("#discovery-results").innerText();
     record(`unfollowed company search (${unfollowed})`, companyText.includes(unfollowed), `${await cards().count()} cards`);
     await shot("04-company-filter");
+    if (await cards().count()) {
+      await Promise.all([
+        page.waitForURL(url => /^\/discover\/[^/]+$/.test(new URL(url).pathname), { timeout: 30_000 }),
+        cards().first().click(),
+      ]);
+      await page.locator("h1").waitFor({ timeout: 30_000 });
+      const detailText = await page.locator("main").innerText();
+      record("catalog card opens its detail workspace", (await page.locator("h1").count()) === 1 && !/could not be opened/i.test(detailText), await page.locator("h1").innerText());
+      const scoreLabel = /Preliminary/.test(detailText) ? "display-only Preliminary fit" : /\/100/.test(detailText) ? "stored historical fit" : "no score rendered";
+      // An unfollowed company may still have an inactive historical
+      // recommendation row. The detail contract deliberately displays that
+      // stored fit; Preliminary is reserved for jobs with no row at all.
+      record("catalog detail renders a non-mutating fit", /Preliminary/.test(detailText) || /\/100/.test(detailText), scoreLabel);
+      await page.goBack({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#discovery-results article", { timeout: 60_000 });
+    }
   }
 
   const writes = requests.filter(item => item.method !== "GET");
   record("page load issues no write requests", writes.length === 0, writes.length ? writes.map(item => `${item.method} ${item.url}`).join(", ") : "only GET requests observed");
+
+  const followCompany = arg("follow-company", "");
+  if (followCompany) {
+    let requestCheckpoint = requests.length;
+    await page.getByRole("button", { name: "Companies", exact: true }).click();
+    const companySearch = page.getByPlaceholder(/Search \d+ verified companies/);
+    await companySearch.fill(followCompany);
+    const row = page.locator("aside button[data-source-company]").filter({ hasText: followCompany }).first();
+    await row.waitFor({ timeout: 30_000 });
+    let wasFollowed = await row.getAttribute("data-subscribed") === "true";
+    if (wasFollowed && process.argv.includes("--ensure-unfollowed")) {
+      await row.click();
+      await page.waitForFunction((name) => [...document.querySelectorAll("aside button[data-source-company]")].some(button => button.getAttribute("data-source-company") === String(name) && button.getAttribute("data-subscribed") === "false"), followCompany, { timeout: 60_000 });
+      wasFollowed = false;
+      requestCheckpoint = requests.length;
+    }
+    if (!wasFollowed) {
+      let followedForTest = false;
+      try {
+        await row.click();
+        await page.waitForFunction((name) => [...document.querySelectorAll("aside button[data-source-company]")].some(button => button.getAttribute("data-source-company") === String(name) && button.getAttribute("data-subscribed") === "true"), followCompany, { timeout: 60_000 });
+        followedForTest = true;
+        const followRequests = requests.slice(requestCheckpoint);
+        const syncWrites = followRequests.filter(item => item.method === "POST" && item.url.startsWith("/api/discover/sync"));
+        record("following seeds catalog matches without a provider scan", syncWrites.length === 0, syncWrites.length ? syncWrites.map(item => item.url).join(", ") : "no sync request observed");
+      } finally {
+        if (followedForTest) {
+          await row.click();
+          await page.waitForFunction((name) => [...document.querySelectorAll("aside button[data-source-company]")].some(button => button.getAttribute("data-source-company") === String(name) && button.getAttribute("data-subscribed") === "false"), followCompany, { timeout: 60_000 });
+        }
+      }
+    } else {
+      record("following seeds catalog matches without a provider scan", false, `${followCompany} was already followed; choose an unfollowed --follow-company`);
+    }
+  }
   const feedRequests = requests.filter(item => item.url.startsWith("/api/discover?"));
   console.log("\nAPI requests observed:");
   for (const item of requests) console.log(`  ${item.status} ${item.ms.toFixed(0).padStart(6)} ms ${item.method} ${item.url}`);

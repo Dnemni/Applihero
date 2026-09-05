@@ -122,7 +122,7 @@ export default function DiscoverPage() {
       action: { label: "Open companies", onClick: () => setShowCompanies(true) },
     },
     {
-      title: "Follow, scan, and set alerts",
+      title: "Follow companies and set alerts",
       description: "Following a company adds its current catalog matches without starting a provider scan. This panel also controls digest frequency and the minimum match score required for an email alert.",
       targetId: "companies-monitor-panel",
       position: "left",
@@ -286,7 +286,7 @@ export default function DiscoverPage() {
     if (!jobs.length) {
       setShowCompanies(true);
       await moveOnboarding(4);
-      toast.info("Choose a company first", "Follow a company and let the initial scan find your first matching role.");
+      toast.info("Choose a company first", "Follow a company to add its current catalog matches.");
       return;
     }
     setShowOnboarding(false);
@@ -567,7 +567,7 @@ export default function DiscoverPage() {
             </div>}
             <label className="mt-5 flex h-11 items-center gap-2 rounded-xl border border-gray-300 bg-white px-3"><Search className="h-4 w-4 text-gray-400" /><input value={catalogQuery} onChange={event => setCatalogQuery(event.target.value)} placeholder={`Search ${sources.length} verified companies`} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
             <div className="mt-2 flex items-center justify-between px-1 text-xs text-gray-500"><span>{visibleSources.length} companies</span><span>{followedSources.length} followed</span></div>
-            <div className="mt-2 space-y-1">{visibleSources.map(source => <button key={source.id} onClick={() => toggleSource(source)} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-white"><span className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${source.subscribed ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600"}`}>{source.subscribed ? <Check className="h-4 w-4" /> : companyInitials(source.company_name)}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{source.company_name}</span><span className="block truncate text-xs capitalize text-gray-500">{providerLabel(source.provider)} · Last updated: {sourceFreshnessLabel(source)}</span>{source.last_sync_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.last_sync_error}</span>}{source.ingestion_task?.status === "failed" && source.ingestion_task.last_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.ingestion_task.last_error}</span>}</span><span className={`text-xs font-semibold ${source.subscribed ? "text-indigo-700" : "text-gray-400"}`}>{source.subscribed ? "Following" : "Follow"}</span></button>)}</div>
+            <div className="mt-2 space-y-1">{visibleSources.map(source => <button key={source.id} data-source-company={source.company_name} data-subscribed={String(source.subscribed)} onClick={() => toggleSource(source)} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-white"><span className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold ${source.subscribed ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600"}`}>{source.subscribed ? <Check className="h-4 w-4" /> : companyInitials(source.company_name)}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{source.company_name}</span><span className="block truncate text-xs capitalize text-gray-500">{providerLabel(source.provider)} · Last updated: {sourceFreshnessLabel(source)}</span>{source.last_sync_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.last_sync_error}</span>}{source.ingestion_task?.status === "failed" && source.ingestion_task.last_error && <span className="mt-0.5 block truncate text-xs text-rose-600">{source.ingestion_task.last_error}</span>}</span><span className={`text-xs font-semibold ${source.subscribed ? "text-indigo-700" : "text-gray-400"}`}>{source.subscribed ? "Following" : "Follow"}</span></button>)}</div>
             <div className="my-6 h-px bg-gray-200" />
             <form onSubmit={findCompany}>
               <div className="flex items-center gap-2"><Plus className="h-4 w-4 text-indigo-600" /><h3 className="font-semibold">Find another company</h3></div>

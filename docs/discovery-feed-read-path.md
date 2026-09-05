@@ -153,7 +153,8 @@ preferences no longer rescans 56 companies.
 eligibility, source, status, freshness, company, and workplace predicates pushed
 to Postgres, ordered by `discovery_jobs.source_published_at DESC NULLS LAST`.
 It returns narrow rows (id, published, location, workplace) for the whole
-qualifying set (a few hundred rows, capped at 3,000), applies the strict
+  qualifying set (a few hundred rows, capped at 5,000 after the followed-source
+  predicate), applies the strict
 location rule in memory, and hydrates only the requested page of cards. Totals
 are exact and every match is reachable through `offset` paging.
 
@@ -253,6 +254,28 @@ counted query (measured shape: about 350 ms round trip at 30k rows).
    hourly. If GitHub keeps skipping slots, raise `perUserLimit` or trigger
    `POST /api/discover/rematch` from the client when `staleMatches` is large.
 
+## 6. Review follow-ups (September 5)
+
+- Synthetic measurement sessions now always use local-scope sign-out in a
+  `finally` block. The earlier default sign-out was global and could revoke the
+  account's other refresh tokens; the browser script also now closes and signs
+  out on failures.
+- The stale job-hash diagnostic selects `evaluatedJobHash` explicitly instead
+  of comparing against a field absent from its projection.
+- Any open catalog role can open in the detail workspace. GET routes never
+  score or write; a catalog-only score is display-only and labeled Preliminary.
+- All roles means the complete worldwide open catalog by default. Saved
+  geography applies only when the user turns on **Only my location**; Matches
+  remains strict at all times.
+- Following a company seeds current stored catalog roles but never starts a
+  provider scan. Manual scans remain limited to followed companies.
+- Matches filters by followed source in Postgres before its 5,000-row safety
+  cap and exposes when that cap makes a total an estimate.
+- Rematch work is least-recently-visited first after the additive cursor
+  migration, with an hourly rotation fallback during rolling deployment.
+- A queue-drain request stops claiming at 230 seconds, and feed PostgREST reads
+  abort at eight seconds with a recoverable HTTP 503 instead of hanging.
+
 ### Policies made explicit
 
 - Matches: score strictly above 50 (no row currently sits at exactly 50).
@@ -264,6 +287,5 @@ counted query (measured shape: about 350 ms round trip at 30k rows).
   a country is remote within that country ("Remote - Australia" is not a US
   match). A bare "City, XX" with a well-known foreign city ("Berlin, DE") is
   foreign, not the US state with that code.
-- Detail pages (`/api/discover/[id]`) still refresh one job's deterministic fit
-  on open. That is bounded to a single row and outside the feed; it can move to
-  the rematch path later if desired.
+- Detail GETs never persist fit. A stale active recommendation requests a
+  bounded one-job rematch after render; a catalog-only role stays display-only.

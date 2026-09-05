@@ -39,8 +39,9 @@ AppliHero first observed a stable provider job ID and is the notification clock.
 
 The shared catalog is independent of individual follows: every enabled company
 is scanned, and Discover searches that catalog. Following a company controls
-email/in-app alerts and permits that user to request a direct, bounded rescan.
-It never limits catalog search results.
+email/in-app alerts, Matches membership, and permission to request a direct,
+bounded rescan. Following seeds up to 100 current catalog roles for that user;
+it never calls a provider or limits All roles catalog search results.
 
 ## Provider behavior
 
@@ -78,18 +79,25 @@ The migrations are
 `supabase/migrations/20260825000000_add_discovery_ingestion_pipeline.sql`,
 `supabase/migrations/20260827000000_add_discovery_ingestion_task_queue.sql`,
 `supabase/migrations/20260902000000_harden_discovery_queue_operations.sql`, and
-`supabase/migrations/20260904000000_add_discovery_location_columns.sql`.
+`supabase/migrations/20260904000000_add_discovery_location_columns.sql`, and
+`supabase/migrations/20260905000000_add_discovery_rematch_cursor.sql`.
 Together they add observation timestamps, source telemetry, detail enrichment,
 the durable hourly task queue, stale-task reconciliation, and normalized
-geography with the indexes the feed queries use. Existing jobs are marked as
-bootstrap observations so deployment does not send false alerts.
+geography with the indexes the feed queries use. The rematch cursor makes a
+bounded finalizer visit the least-recently refreshed users first. Existing jobs
+are marked as bootstrap observations so deployment does not send false alerts.
 
 After applying the 20260904 migration, populate geography for existing rows:
 
 ```bash
 npm run backfill:discovery-locations -- --dry-run
 npm run backfill:discovery-locations
+npm run verify:discovery-location-filter
 ```
+
+The verifier compares the database predicate with the application classifier
+on the same 1,000 real open jobs for five location policies. Do not rely on the
+database path until every fixture reports zero disagreements.
 
 Until the migration is applied the feed keeps working: it filters a bounded
 window in memory and marks catalog totals as estimates.
@@ -138,7 +146,9 @@ private worker HTTP handlers are regular Vercel routes under the same
    external scheduler). GitHub Actions is the hourly scheduler and runs two
    staggered schedules (`:00` and `:30`) because its scheduler has been seen
    skipping slots for hours; the dispatcher is idempotent per hour bucket so
-   the second run only drains leftover work.
+   the second run only drains leftover work. Each of four worker lanes stops
+   claiming after 230 seconds and may call the route up to three times; that
+   remains inside the workflow's 12-minute limit while resuming a nonempty queue.
 5. Push and deploy `.github/workflows/discovery-sync.yml` together with the
    application changes, then run the workflow manually once. Confirm
    `/api/cron/discover/status` reports queued work decreasing and successful

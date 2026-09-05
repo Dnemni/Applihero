@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateDisplayFit, selectRematchRows, type RematchRow } from "../rematch";
+import { evaluateDisplayFit, rotateUserIdsForHour, selectRematchRows, type RematchRow } from "../rematch";
 
 const currency = { matcherVersion: "v1", profileHash: "profile" };
 function row(id: string, quickFit: Partial<RematchRow["quick_fit"]> | null, fitScore: number | null = 70, contentHash = "job"): RematchRow {
@@ -40,4 +40,11 @@ test("display fit always carries deterministic currency and the discovery eligib
   assert.equal(fit.evaluatedProfileHash, "profile-hash");
   assert.equal(fit.evaluatedJobHash, "job-hash");
   assert.equal(typeof fit.discoveryEligible, "boolean");
+});
+
+test("hour-bucket fallback rotation does not starve the same leading users", () => {
+  const users = ["a", "b", "c"];
+  assert.deepEqual(rotateUserIdsForHour(users, new Date("2026-09-05T00:00:00Z")), ["a", "b", "c"]);
+  assert.deepEqual(rotateUserIdsForHour(users, new Date("2026-09-05T01:00:00Z")), ["b", "c", "a"]);
+  assert.deepEqual(rotateUserIdsForHour(users, new Date("2026-09-05T02:00:00Z")), ["c", "a", "b"]);
 });

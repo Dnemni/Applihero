@@ -34,6 +34,17 @@ export type RematchSummary = {
   durationMs: number;
 };
 
+export function rotateUserIdsForHour(userIds: string[], value: Date = new Date()) {
+  if (userIds.length < 2) return [...userIds];
+  const hour = Math.floor(value.getTime() / 3_600_000);
+  const offset = hour % userIds.length;
+  return [...userIds.slice(offset), ...userIds.slice(0, offset)];
+}
+
+function missingRematchCursor(error: any) {
+  return error?.code === "42703" || /discovery_rematched_at/.test(String(error?.message || ""));
+}
+
 /**
  * Picks which stored rows to recompute inside one bounded run. Rows the
  * matcher would treat as current are skipped; the rest are ordered so roles
@@ -221,23 +232,54 @@ export async function seedUserSourceRecommendations(userId: string, sourceId: st
 /**
  * Finalizer step: walk every subscriber within a time budget so profile,
  * answer, matcher, and posting changes converge without any page load doing
- * the work. Users are visited in a stable order and the budget is generous
- * enough that the hourly cadence keeps up with normal churn.
+ * the work. Users are visited oldest-refresh-first; during a rolling deploy
+ * before the cursor column exists, an hourly rotation prevents a low limit
+ * from selecting the same alphabetical users forever.
  */
 export async function processDiscoveryRematches(options: { userLimit?: number; perUserLimit?: number; budgetMs?: number } = {}) {
   const started = Date.now();
   const budgetMs = Math.max(5_000, Math.min(options.budgetMs || 60_000, 100_000));
   const userLimit = Math.max(1, Math.min(options.userLimit || 100, 500));
   const perUserLimit = Math.max(1, Math.min(options.perUserLimit || REMATCH_DEFAULT_LIMIT, REMATCH_MAX_LIMIT));
-  const { data, error } = await db().from("user_job_source_subscriptions").select("user_id").eq("enabled", true).order("user_id").limit(5_000);
+  const database = db();
+  const { data, error } = await database.from("user_job_source_subscriptions").select("user_id").eq("enabled", true).order("user_id").limit(5_000);
   if (error) throw error;
-  const userIds = Array.from(new Set<string>((data || []).map((row: any) => String(row.user_id)))).slice(0, userLimit);
+  const subscribedUserIds = Array.from(new Set<string>((data || []).map((row: any) => String(row.user_id))));
+  let orderedUserIds: string[] = [];
+  let cursorAvailable = true;
+  const cursorRows: Array<{ id: string; discovery_rematched_at: string | null }> = [];
+  for (let index = 0; index < subscribedUserIds.length; index += 200) {
+    const response = await database.from("profiles").select("id,discovery_rematched_at").in("id", subscribedUserIds.slice(index, index + 200));
+    if (response.error) {
+      if (missingRematchCursor(response.error)) { cursorAvailable = false; break; }
+      throw response.error;
+    }
+    cursorRows.push(...(response.data || []));
+  }
+  if (cursorAvailable) {
+    const timestamps = new Map(cursorRows.map(row => [String(row.id), row.discovery_rematched_at]));
+    orderedUserIds = [...subscribedUserIds].sort((left, right) => {
+      const leftAt = timestamps.get(left);
+      const rightAt = timestamps.get(right);
+      if (!leftAt && rightAt) return -1;
+      if (leftAt && !rightAt) return 1;
+      return String(leftAt || "").localeCompare(String(rightAt || "")) || left.localeCompare(right);
+    });
+  } else {
+    orderedUserIds = rotateUserIdsForHour(subscribedUserIds);
+  }
+  const userIds = orderedUserIds.slice(0, userLimit);
   const summaries: RematchSummary[] = [];
   let skippedForBudget = 0;
   for (const userId of userIds) {
     if (Date.now() - started > budgetMs) { skippedForBudget += 1; continue; }
     try {
       summaries.push(await rematchUserRecommendations(userId, { limit: perUserLimit }));
+      if (cursorAvailable) {
+        const { error: cursorError } = await database.from("profiles").update({ discovery_rematched_at: new Date().toISOString() }).eq("id", userId);
+        if (cursorError && !missingRematchCursor(cursorError)) throw cursorError;
+        if (cursorError) cursorAvailable = false;
+      }
     } catch (caught) {
       console.error(`Discovery rematch failed for ${userId}:`, caught);
     }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { hourlyBucket, retryDelaySeconds } from "../ingestion-queue";
+import { drainWith, hourlyBucket, retryDelaySeconds } from "../ingestion-queue";
 
 test("hourly task bucket is stable across duplicate dispatcher calls", () => {
   const first = hourlyBucket(new Date("2026-08-27T13:59:59.999Z"));
@@ -17,6 +17,20 @@ test("retry backoff is bounded and increases by attempt", () => {
   assert.ok(first >= 300 && first < 330);
   assert.ok(later >= 2400 && later < 2430);
   assert.ok(capped >= 3600 && capped < 3630);
+});
+
+test("queue drain stops before another claim when its wall-clock budget is exhausted", async () => {
+  let clock = 0;
+  let calls = 0;
+  const result = await drainWith(async () => {
+    calls += 1;
+    clock += 60;
+    return { claimed: 1, completed: 1, retried: 0, failed: 0, results: [] };
+  }, { budgetMs: 100, now: () => clock, idlePause: async () => undefined });
+  assert.equal(calls, 2);
+  assert.equal(result.claimed, 2);
+  assert.equal(result.exhaustedBudget, true);
+  assert.equal(result.exhaustedCapacity, false);
 });
 
 test("queue migration enforces idempotency and atomic concurrent claims", async () => {

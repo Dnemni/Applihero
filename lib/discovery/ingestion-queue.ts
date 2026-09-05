@@ -121,14 +121,22 @@ const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolv
  * Drain one lane without creating a long-lived worker. A short idle grace
  * lets another lane finish a task and release a retry before this lane exits.
  */
-export async function drainDiscoveryIngestionWorker(options: { maxTasks?: number; idlePolls?: number } = {}) {
+type WorkerResult = Awaited<ReturnType<typeof runDiscoveryIngestionWorker>>;
+
+export async function drainWith(
+  runner: () => Promise<WorkerResult>,
+  options: { maxTasks?: number; idlePolls?: number; budgetMs?: number; now?: () => number; idlePause?: () => Promise<unknown> } = {},
+) {
   const maxTasks = Math.max(1, Math.min(options.maxTasks || 34, 40));
   const idlePolls = Math.max(1, Math.min(options.idlePolls || 3, 5));
-  const results: Array<Awaited<ReturnType<typeof runDiscoveryIngestionWorker>>> = [];
+  const budgetMs = Math.max(1, Math.min(options.budgetMs || 230_000, 280_000));
+  const now = options.now || Date.now;
+  const started = now();
+  const results: WorkerResult[] = [];
   let idle = 0;
   let claimed = 0;
-  while (claimed < maxTasks && idle < idlePolls) {
-    const result = await runDiscoveryIngestionWorker(1);
+  while (claimed < maxTasks && idle < idlePolls && now() - started < budgetMs) {
+    const result = await runner();
     results.push(result);
     claimed += result.claimed;
     if (result.claimed) {
@@ -136,8 +144,9 @@ export async function drainDiscoveryIngestionWorker(options: { maxTasks?: number
       continue;
     }
     idle += 1;
-    if (idle < idlePolls) await pause(1_500);
+    if (idle < idlePolls) await (options.idlePause ? options.idlePause() : pause(1_500));
   }
+  const exhaustedBudget = now() - started >= budgetMs;
   return {
     claimed,
     completed: results.reduce((sum, result) => sum + result.completed, 0),
@@ -145,7 +154,12 @@ export async function drainDiscoveryIngestionWorker(options: { maxTasks?: number
     failed: results.reduce((sum, result) => sum + result.failed, 0),
     idlePolls: idle,
     exhaustedCapacity: claimed >= maxTasks,
+    exhaustedBudget,
   };
+}
+
+export async function drainDiscoveryIngestionWorker(options: { maxTasks?: number; idlePolls?: number; budgetMs?: number } = {}) {
+  return drainWith(() => runDiscoveryIngestionWorker(1), options);
 }
 
 export async function retryDiscoveryIngestionTask(taskId: string) {

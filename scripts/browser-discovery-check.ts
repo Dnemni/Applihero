@@ -94,15 +94,15 @@ async function main() {
   await page.waitForFunction((previous) => document.querySelectorAll("#discovery-results article").length > previous, allFirst, { timeout: 30_000 });
   record("all roles pages", (await cards().count()) > allFirst, `${await cards().count()} cards after one more page`);
 
+  const locatedResponsePromise = page.waitForResponse(response => response.url().includes("/api/discover?") && response.url().includes("useSavedLocation=1") && response.status() === 200, { timeout: 60_000 });
   await page.getByLabel("Only my location").check();
-  await page.waitForFunction((previous) => {
-    const text = document.querySelector("#discover-overview p.text-sm.text-gray-600")?.textContent || "";
-    return text !== previous && !document.body.innerText.includes("Loading jobs…");
-  }, allHeader, { timeout: 60_000 });
-  const locatedHeader = await page.locator("#discover-overview p.text-sm.text-gray-600").innerText();
-  const locatedTotal = Number((locatedHeader.match(/([\d,]+) open/)?.[1] || "0").replace(/,/g, ""));
+  const locatedPayload = await (await locatedResponsePromise).json();
+  await page.waitForFunction((expected) => (document.querySelector("#discover-overview p.text-sm.text-gray-600")?.textContent || "").includes(Number(expected).toLocaleString()), locatedPayload.totalResults, { timeout: 60_000 });
+  const locatedTotal = Number(locatedPayload.totalResults || 0);
   record("saved location is an explicit All roles filter", locatedTotal > 0 && locatedTotal < allTotal, `${locatedTotal.toLocaleString()} location-filtered vs ${allTotal.toLocaleString()} worldwide`);
   await page.getByLabel("Only my location").uncheck();
+  // This page was loaded moments ago and should normally be restored from the
+  // bounded client cache, so do not require another network response.
   await page.waitForFunction((expected) => (document.querySelector("#discover-overview p.text-sm.text-gray-600")?.textContent || "").includes(Number(expected).toLocaleString()), allTotal, { timeout: 60_000 });
   await shot("03-all-roles");
 
@@ -110,8 +110,10 @@ async function main() {
   if (unfollowed) {
     await page.getByRole("button", { name: /more filters|filters/i }).first().click().catch(() => {});
     await page.locator("select").filter({ has: page.locator("option", { hasText: "All companies" }) }).selectOption({ label: unfollowed }).catch(() => {});
+    const companyResponsePromise = page.waitForResponse(response => response.url().includes("/api/discover?") && response.url().includes(`company=${encodeURIComponent(unfollowed)}`) && response.status() === 200, { timeout: 60_000 });
     await page.getByRole("button", { name: "Apply filters" }).click().catch(() => {});
-    await page.waitForTimeout(1_500);
+    await companyResponsePromise;
+    await page.waitForFunction((company) => [...document.querySelectorAll("#discovery-results article")].every(card => card.textContent?.includes(String(company))), unfollowed, { timeout: 60_000 });
     const companyText = await page.locator("#discovery-results").innerText();
     record(`unfollowed company search (${unfollowed})`, companyText.includes(unfollowed), `${await cards().count()} cards`);
     await shot("04-company-filter");

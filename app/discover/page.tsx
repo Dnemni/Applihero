@@ -10,7 +10,7 @@ import {
 import { Header } from "@/components/header";
 import { OnboardingOverlay, type OnboardingStep } from "@/components/onboarding-overlay";
 import { toast } from "@/components/toast";
-import { discoveryFetch, fetchDiscoveryFeedPage, invalidateDiscoveryFeedCache } from "@/lib/discovery/client";
+import { DiscoveryFeedRequestError, discoveryFetch, fetchDiscoveryFeedPage, invalidateDiscoveryFeedCache } from "@/lib/discovery/client";
 import { advanceOnboarding, getOnboardingState, setOnboardingState, shouldShowOnboarding } from "@/lib/onboarding-state";
 import type { DiscoveryFeedResponse, DiscoveryJobCard, DiscoveryNotification, DiscoverySource, DiscoverySourceRecommendation, DiscoverySourceSuggestion, EligibilityStatus } from "@/lib/discovery/types";
 
@@ -67,6 +67,7 @@ export default function DiscoverPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ completed: number; total: number } | null>(null);
   const [error, setError] = useState("");
+  const [feedRetryable, setFeedRetryable] = useState(false);
   const [sourceError, setSourceError] = useState("");
   const [hasBackground, setHasBackground] = useState(false);
   const [hasSubscriptions, setHasSubscriptions] = useState(false);
@@ -177,6 +178,7 @@ export default function DiscoverPage() {
     else if (jobs.length === 0) setLoading(true);
     else setRefreshing(true);
     setError("");
+    setFeedRetryable(false);
     try {
       const filters = currentFilters(overrides);
       const payload = await fetchDiscoveryFeedPage({ ...filters, offset: append ? resultSummary.nextOffset || 0 : 0, limit: FEED_PAGE_SIZE });
@@ -187,6 +189,7 @@ export default function DiscoverPage() {
       if (requestId !== jobRequestSequence.current) return;
       const message = caught instanceof Error ? caught.message : "Unable to load jobs";
       setError(message);
+      setFeedRetryable(caught instanceof DiscoveryFeedRequestError && caught.status === 503);
       if (message === "Authentication required" || message.includes("session")) router.push("/login");
     } finally {
       if (requestId === jobRequestSequence.current) {
@@ -510,7 +513,7 @@ export default function DiscoverPage() {
           <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 sm:px-7"><h2 className="font-semibold">Latest openings</h2><span className="inline-flex items-center gap-2 text-xs text-gray-500">{refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-500" />}{jobs.length < resultSummary.total ? `${jobs.length} of ${resultSummary.totalIsEstimate ? "about " : ""}${resultSummary.total.toLocaleString()}` : resultSummary.total.toLocaleString()} results</span></div>
           {feedScope === "matches" && resultSummary.stale > 0 && !loading && <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50/70 px-5 py-3 text-sm text-amber-950 sm:px-7"><RefreshCw className={`h-4 w-4 shrink-0 ${rematching ? "animate-spin" : ""}`} /><span>{resultSummary.stale} match {resultSummary.stale === 1 ? "score predates" : "scores predate"} your latest profile or posting changes. Scores refresh hourly in the background.</span><button type="button" onClick={() => void refreshMatchScores()} disabled={rematching} className="ml-auto shrink-0 rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 transition hover:border-amber-400 disabled:opacity-60">{rematching ? "Refreshing…" : "Refresh scores now"}</button></div>}
           {loading ? <div className="py-24 text-center"><RefreshCw className="mx-auto h-6 w-6 animate-spin text-indigo-500" /><p className="mt-3 text-sm text-gray-500">Loading jobs…</p></div>
-          : error ? <div className="py-20 text-center text-rose-700"><CircleAlert className="mx-auto h-7 w-7" /><p className="mt-3 font-semibold">Could not load jobs</p><p className="mt-1 text-sm">{error}</p></div>
+          : error ? <div className="py-20 text-center text-rose-700"><CircleAlert className="mx-auto h-7 w-7" /><p className="mt-3 font-semibold">Could not load jobs</p><p className="mt-1 text-sm">{error}</p>{feedRetryable && <button type="button" onClick={() => void loadJobs()} className="mt-4 rounded-full border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-800 transition hover:border-rose-400">Try again</button>}</div>
           : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" />{feedScope === "all" ? <><p className="mt-4 font-semibold">No open catalog roles match these filters</p><p className="mt-1 text-sm text-gray-500">Clear a search or filter to return to the complete catalog.</p></> : activeSourceCount ? <><p className="mt-4 font-semibold">The catalog is updating</p><p className="mt-1 text-sm text-gray-500">{activeSourceCount} source{activeSourceCount === 1 ? " is" : "s are"} queued or updating. New matching roles will appear here automatically.</p></> : failedSourceCount ? <><p className="mt-4 font-semibold">A company check needs another try</p><p className="mt-1 text-sm text-gray-500">Your existing matches are safe. Open Companies to see which source is retrying.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Review companies</button></> : <><p className="mt-4 font-semibold">No roles match this view</p><p className="mt-1 text-sm text-gray-500">Try broadening filters, viewing all roles, or adjusting your location preferences.</p></>}</div>
           : <div>{jobs.map(job => {
             const eligibility = job.fitState === "catalog" ? { dot: "bg-gray-300", text: "text-gray-500", score: "text-gray-500" } : eligibilityStyles[job.quickFit.eligibility.status];

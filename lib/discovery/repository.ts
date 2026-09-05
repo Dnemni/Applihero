@@ -8,6 +8,30 @@ const db = () => {
   return supabaseAdmin as any;
 };
 
+export class DiscoveryQueryTimeoutError extends Error {
+  constructor(public readonly stage: string, public readonly timeoutMs: number) {
+    super(`Discovery database query timed out during ${stage} after ${timeoutMs}ms`);
+    this.name = "DiscoveryQueryTimeoutError";
+  }
+}
+
+/** Adds a cancellation signal to PostgREST reads so one database outlier cannot consume an entire request. */
+export async function withQueryTimeout<T>(builder: { abortSignal: (signal: AbortSignal) => PromiseLike<T> }, ms = 8_000, stage = "feed"): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, ms);
+  try {
+    const result = await builder.abortSignal(controller.signal);
+    if (timedOut) throw new DiscoveryQueryTimeoutError(stage, ms);
+    return result;
+  } catch (error) {
+    if (timedOut || (error instanceof Error && error.name === "AbortError")) throw new DiscoveryQueryTimeoutError(stage, ms);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function ensureCurrentParsing(job: DiscoveryJob): Promise<DiscoveryJob> {
   if (job.parser_version === REQUIREMENTS_PARSER_VERSION) return job;
   const parsedRequirements = parseJobRequirements(job.description || "");
@@ -370,7 +394,7 @@ export async function getUserMatchCandidates(userId: string, options: {
     if (options.company) query = query.ilike("discovery_jobs.company_name", `%${safeSearchTerm(options.company)}%`);
     if (options.location) query = query.ilike("discovery_jobs.location", `%${safeSearchTerm(options.location)}%`);
     if (options.workplace) query = query.ilike("discovery_jobs.workplace_type", options.workplace);
-    const { data, error } = await query;
+    const { data, error } = await withQueryTimeout<any>(query, 8_000, "match candidates");
     if (error) throw error;
     rows.push(...(data || []));
     if (!data || data.length < requestSize) break;
@@ -396,9 +420,9 @@ export async function getUserMatchCandidates(userId: string, options: {
 /** Hydrates one page of match cards (job projection plus stored fit) in a single query, preserving the requested order. */
 export async function getUserMatchCards(userId: string, ids: string[]): Promise<Array<{ job: DiscoveryJob; quickFit: any }>> {
   if (!ids.length) return [];
-  const { data, error } = await db().from("user_job_recommendations")
+  const { data, error } = await withQueryTimeout<any>(db().from("user_job_recommendations")
     .select(`discovery_job_id,quick_fit,discovery_jobs!inner(${DISCOVERY_CARD_FIELDS})`)
-    .eq("user_id", userId).in("discovery_job_id", ids);
+    .eq("user_id", userId).in("discovery_job_id", ids), 8_000, "match cards");
   if (error) throw error;
   const byId = new Map<string, { job: DiscoveryJob; quickFit: any }>();
   for (const row of data || []) {
@@ -476,10 +500,10 @@ export async function getCatalogDiscoveryJobPage(options: {
   if (unrestrictedLocation) {
     let query = db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS, { count: "exact" });
     query = applyCatalogFilterSteps(query, filterSteps);
-    const { data, error, count } = await query
+    const { data, error, count } = await withQueryTimeout<any>(query
       .order("source_published_at", { ascending: false, nullsFirst: false })
       .order("id", { ascending: true })
-      .range(offset, offset + limit - 1);
+      .range(offset, offset + limit - 1), 8_000, "catalog page");
     if (error) throw error;
     const items = (data || []).map((job: any) => ({ ...job, description: "", description_html: null, parsed_requirements: [] })) as DiscoveryJob[];
     const total = count ?? offset + items.length;
@@ -490,10 +514,10 @@ export async function getCatalogDiscoveryJobPage(options: {
   if (supportsLocation) {
     let query = db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS, { count: "exact" });
     query = applyCatalogFilterSteps(query, [...filterSteps, ...buildCatalogLocationSteps(options.location)]);
-    const { data, error, count } = await query
+    const { data, error, count } = await withQueryTimeout<any>(query
       .order("source_published_at", { ascending: false, nullsFirst: false })
       .order("id", { ascending: true })
-      .range(offset, offset + limit - 1);
+      .range(offset, offset + limit - 1), 8_000, "location-filtered catalog page");
     if (error) throw error;
     const items = (data || []).map((job: any) => ({ ...job, description: "", description_html: null, parsed_requirements: [] })) as DiscoveryJob[];
     const total = count ?? offset + items.length;
@@ -508,10 +532,10 @@ export async function getCatalogDiscoveryJobPage(options: {
   while (narrow.length < CATALOG_FALLBACK_WINDOW) {
     let query = db().from("discovery_jobs").select("id,location,workplace_type,source_published_at");
     query = applyCatalogFilterSteps(query, filterSteps);
-    const { data, error } = await query
+    const { data, error } = await withQueryTimeout<any>(query
       .order("source_published_at", { ascending: false, nullsFirst: false })
       .order("id", { ascending: true })
-      .range(narrow.length, narrow.length + pageSize - 1);
+      .range(narrow.length, narrow.length + pageSize - 1), 8_000, "catalog location fallback");
     if (error) throw error;
     narrow.push(...(data || []));
     if (!data || data.length < pageSize) break;
@@ -519,7 +543,7 @@ export async function getCatalogDiscoveryJobPage(options: {
   const visible = narrow.filter(job => matchesDiscoveryLocation(job, options.location));
   const pageIds = visible.slice(offset, offset + limit).map(job => job.id);
   const { data: rows, error: rowError } = pageIds.length
-    ? await db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS).in("id", pageIds)
+    ? await withQueryTimeout<any>(db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS).in("id", pageIds), 8_000, "catalog card hydration")
     : { data: [], error: null };
   if (rowError) throw rowError;
   const byId = new Map((rows || []).map((job: any) => [job.id, { ...job, description: "", description_html: null, parsed_requirements: [] }]));

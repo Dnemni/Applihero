@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiAuthError, requireApiUser } from "@/lib/discovery/auth";
 import {
-  getCatalogDiscoveryJobPage, getUserApplicationStates, getUserLocationPreferenceRows, getUserMatchCandidates,
+  DiscoveryQueryTimeoutError, getCatalogDiscoveryJobPage, getUserApplicationStates, getUserLocationPreferenceRows, getUserMatchCandidates,
   getUserMatchCards, getUserProfileContext, getUserSourceIds, hasUserSubscriptions,
 } from "@/lib/discovery/repository";
 import { MATCHER_VERSION } from "@/lib/discovery/matcher";
@@ -108,8 +108,11 @@ export async function GET(request: NextRequest) {
       headers: { "Cache-Control": "no-store", "Server-Timing": timer.header() },
     });
   } catch (error) {
-    const status = error instanceof ApiAuthError ? error.status : 500;
+    const status = error instanceof ApiAuthError ? error.status : error instanceof DiscoveryQueryTimeoutError ? 503 : 500;
     console.error("Discover list error:", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load jobs" }, { status, headers: { "Server-Timing": timer.header() } });
+    const message = error instanceof DiscoveryQueryTimeoutError
+      ? "The catalog is slow right now. Try again in a moment."
+      : error instanceof Error ? error.message : "Unable to load jobs";
+    return NextResponse.json({ error: message }, { status, headers: { "Server-Timing": timer.header() } });
   }
 }

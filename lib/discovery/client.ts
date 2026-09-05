@@ -28,6 +28,13 @@ const feedCache = new BoundedFeedCache<DiscoveryFeedResponse>({ maxEntries: 40, 
 
 export type DiscoveryFeedRequest = Omit<FeedCacheKeyParts, "userId">;
 
+export class DiscoveryFeedRequestError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "DiscoveryFeedRequestError";
+  }
+}
+
 /** Loads one feed page through the bounded cache, deduplicating identical concurrent requests. */
 export async function fetchDiscoveryFeedPage(request: DiscoveryFeedRequest): Promise<DiscoveryFeedResponse> {
   const session = await discoverySession();
@@ -45,7 +52,7 @@ export async function fetchDiscoveryFeedPage(request: DiscoveryFeedRequest): Pro
     if (request.offset) params.set("offset", String(request.offset));
     const response = await discoveryFetch(`/api/discover?${params}`);
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Unable to load jobs");
+    if (!response.ok) throw new DiscoveryFeedRequestError(payload.error || "Unable to load jobs", response.status);
     return payload as DiscoveryFeedResponse;
   });
 }

@@ -459,6 +459,19 @@ export async function getCatalogDiscoveryJobPage(options: {
   const limit = Math.max(1, Math.min(options.limit, 100));
   const offset = Math.max(0, options.offset);
   const filterSteps = buildCatalogFilterSteps(options.filters);
+  const unrestrictedLocation = options.location.locationScope === "worldwide" && !options.location.preferredCountry && options.location.includeRemote;
+  if (unrestrictedLocation) {
+    let query = db().from("discovery_jobs").select(DISCOVERY_CARD_FIELDS, { count: "exact" });
+    query = applyCatalogFilterSteps(query, filterSteps);
+    const { data, error, count } = await query
+      .order("source_published_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+    const items = (data || []).map((job: any) => ({ ...job, description: "", description_html: null, parsed_requirements: [] })) as DiscoveryJob[];
+    const total = count ?? offset + items.length;
+    return { items, total, totalIsEstimate: false, offset, nextOffset: offset + items.length < total ? offset + items.length : null, locationFilteredInDatabase: true };
+  }
   const supportsLocation = await discoveryJobsSupportLocationColumns();
 
   if (supportsLocation) {

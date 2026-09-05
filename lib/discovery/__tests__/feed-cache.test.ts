@@ -9,6 +9,7 @@ test("cache keys include every input that changes a page", () => {
   assert.notEqual(feedCacheKey(base), feedCacheKey({ ...base, scope: "all" }));
   assert.notEqual(feedCacheKey(base), feedCacheKey({ ...base, userId: "u2" }));
   assert.notEqual(feedCacheKey(base), feedCacheKey({ ...base, freshness: "7" }));
+  assert.notEqual(feedCacheKey(base), feedCacheKey({ ...base, useSavedLocation: true }));
   assert.equal(feedCacheKey({ ...base, company: "Roblox" }), feedCacheKey({ ...base, company: " roblox " }));
 });
 

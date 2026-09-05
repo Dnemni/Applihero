@@ -21,7 +21,7 @@ const eligibilityStyles: Record<EligibilityStatus, { dot: string; text: string; 
 };
 const INTERACTIVE_SOURCE_BATCH_SIZE = 6;
 const FEED_PAGE_SIZE = 50;
-type FeedFilters = { query: string; company: string; location: string; workplace: string; freshness: string; scope: "matches" | "all" };
+type FeedFilters = { query: string; company: string; location: string; workplace: string; freshness: string; scope: "matches" | "all"; useSavedLocation: boolean };
 
 function companyInitials(company: string) {
   return company.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
@@ -76,6 +76,7 @@ export default function DiscoverPage() {
   const [workplace, setWorkplace] = useState("");
   const [freshness, setFreshness] = useState("");
   const [feedScope, setFeedScope] = useState<"matches" | "all">("matches");
+  const [useSavedLocation, setUseSavedLocation] = useState(false);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [showCompanies, setShowCompanies] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -146,6 +147,7 @@ export default function DiscoverPage() {
       query: overrides?.query ?? query, company: overrides?.company ?? company, location: overrides?.location ?? location,
       workplace: overrides?.workplace ?? workplace, freshness: overrides?.freshness ?? freshness,
       scope: overrides?.scope ?? feedScope,
+      useSavedLocation: overrides?.useSavedLocation ?? useSavedLocation,
     };
   }
 
@@ -523,6 +525,7 @@ export default function DiscoverPage() {
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <div className="mr-1 inline-flex rounded-full border border-gray-300 bg-white/80 p-1"><button type="button" onClick={() => { setFeedScope("matches"); void loadJobs({ scope: "matches" }); }} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${feedScope === "matches" ? "bg-gray-950 text-white" : "text-gray-600 hover:text-gray-950"}`}>Matches</button><button type="button" onClick={() => { setFeedScope("all"); void loadJobs({ scope: "all" }); }} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${feedScope === "all" ? "bg-gray-950 text-white" : "text-gray-600 hover:text-gray-950"}`}>All roles</button></div>
+            {feedScope === "all" && <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-300 bg-white/70 px-3.5 py-2 text-xs font-semibold text-gray-600"><input type="checkbox" checked={useSavedLocation} onChange={event => { const next = event.target.checked; setUseSavedLocation(next); void loadJobs({ useSavedLocation: next, scope: "all" }); }} className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600" />Only my location</label>}
             {["remote", "hybrid", "on-site"].map(value => <button type="button" key={value} onClick={() => { const next = workplace === value ? "" : value; setWorkplace(next); loadJobs({ workplace: next }); }} className={`rounded-full border px-3.5 py-2 text-xs font-semibold capitalize transition ${workplace === value ? "border-indigo-600 bg-indigo-600 text-white" : "border-gray-300 bg-white/70 text-gray-600 hover:border-gray-400"}`}>{value}</button>)}
             <button type="button" onClick={() => setShowMoreFilters(value => !value)} className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold transition ${showMoreFilters ? "border-gray-900 bg-gray-900 text-white" : "border-gray-300 bg-white/70 text-gray-600 hover:border-gray-400"}`}><Settings2 className="h-3.5 w-3.5" />More filters <ChevronDown className={`h-3.5 w-3.5 transition ${showMoreFilters ? "rotate-180" : ""}`} /></button>
             {(query || company || location || workplace || freshness) && <button type="button" onClick={() => { setQuery(""); setCompany(""); setLocation(""); setWorkplace(""); setFreshness(""); loadJobs({ query: "", company: "", location: "", workplace: "", freshness: "" }); }} className="px-2 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900">Clear all</button>}
@@ -536,7 +539,7 @@ export default function DiscoverPage() {
           {feedScope === "matches" && resultSummary.stale > 0 && !loading && <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50/70 px-5 py-3 text-sm text-amber-950 sm:px-7"><RefreshCw className={`h-4 w-4 shrink-0 ${rematching ? "animate-spin" : ""}`} /><span>{resultSummary.stale} match {resultSummary.stale === 1 ? "score predates" : "scores predate"} your latest profile or posting changes. Scores refresh hourly in the background.</span><button type="button" onClick={() => void refreshMatchScores()} disabled={rematching} className="ml-auto shrink-0 rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 transition hover:border-amber-400 disabled:opacity-60">{rematching ? "Refreshing…" : "Refresh scores now"}</button></div>}
           {loading ? <div className="py-24 text-center"><RefreshCw className="mx-auto h-6 w-6 animate-spin text-indigo-500" /><p className="mt-3 text-sm text-gray-500">Loading jobs…</p></div>
           : error ? <div className="py-20 text-center text-rose-700"><CircleAlert className="mx-auto h-7 w-7" /><p className="mt-3 font-semibold">Could not load jobs</p><p className="mt-1 text-sm">{error}</p></div>
-          : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" />{activeSourceCount ? <><p className="mt-4 font-semibold">The catalog is updating</p><p className="mt-1 text-sm text-gray-500">{activeSourceCount} source{activeSourceCount === 1 ? " is" : "s are"} queued or updating. New matching roles will appear here automatically.</p></> : failedSourceCount ? <><p className="mt-4 font-semibold">A company check needs another try</p><p className="mt-1 text-sm text-gray-500">Your existing matches are safe. Open Companies to see which source is retrying.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Review companies</button></> : <><p className="mt-4 font-semibold">No roles match this view</p><p className="mt-1 text-sm text-gray-500">Try broadening filters, viewing all roles, or adjusting your location preferences.</p></>}</div>
+          : jobs.length === 0 ? <div className="py-24 text-center"><BriefcaseBusiness className="mx-auto h-8 w-8 text-gray-300" />{feedScope === "all" ? <><p className="mt-4 font-semibold">No open catalog roles match these filters</p><p className="mt-1 text-sm text-gray-500">Clear a search or filter to return to the complete catalog.</p></> : activeSourceCount ? <><p className="mt-4 font-semibold">The catalog is updating</p><p className="mt-1 text-sm text-gray-500">{activeSourceCount} source{activeSourceCount === 1 ? " is" : "s are"} queued or updating. New matching roles will appear here automatically.</p></> : failedSourceCount ? <><p className="mt-4 font-semibold">A company check needs another try</p><p className="mt-1 text-sm text-gray-500">Your existing matches are safe. Open Companies to see which source is retrying.</p><button onClick={() => setShowCompanies(true)} className="mt-4 rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Review companies</button></> : <><p className="mt-4 font-semibold">No roles match this view</p><p className="mt-1 text-sm text-gray-500">Try broadening filters, viewing all roles, or adjusting your location preferences.</p></>}</div>
           : <div>{jobs.map(job => {
             const eligibility = job.fitState === "catalog" ? { dot: "bg-gray-300", text: "text-gray-500", score: "text-gray-500" } : eligibilityStyles[job.quickFit.eligibility.status];
             const reason = job.quickFit.eligibility.reasons[0] || job.quickFit.reasons[0];

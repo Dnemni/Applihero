@@ -14,6 +14,7 @@ export type FeedCacheKeyParts = {
   location?: string;
   workplace?: string;
   freshness?: string;
+  useSavedLocation?: boolean;
   offset: number;
   limit: number;
 };
@@ -23,7 +24,7 @@ export function feedCacheKey(parts: FeedCacheKeyParts) {
     parts.userId, parts.scope,
     `q=${(parts.query || "").trim().toLowerCase()}`, `c=${(parts.company || "").trim().toLowerCase()}`,
     `l=${(parts.location || "").trim().toLowerCase()}`, `w=${(parts.workplace || "").trim().toLowerCase()}`,
-    `f=${parts.freshness || ""}`, `o=${parts.offset}`, `n=${parts.limit}`,
+    `f=${parts.freshness || ""}`, `saved=${parts.useSavedLocation ? "1" : "0"}`, `o=${parts.offset}`, `n=${parts.limit}`,
   ].join("|");
 }
 

@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
     const rawFreshness = params.get("freshness");
     const freshness = Math.max(0, Number(rawFreshness || 0) || 0);
     const scope = params.get("scope") === "all" ? "all" : "matches";
+    const useSavedLocation = params.get("useSavedLocation") === "1";
     const limit = clampFeedLimit(params.get("limit"));
     const offset = clampFeedOffset(params.get("offset"));
     const user = await timer.time("auth", () => requireApiUser(request));
@@ -86,7 +87,8 @@ export async function GET(request: NextRequest) {
       // including the saved location rule, is applied before paging so totals
       // and "Show more" describe the whole catalog rather than one fetched window.
       const catalogPage = await timer.time("catalog", () => getCatalogDiscoveryJobPage({
-        offset, limit, filters: { query, company, location, workplace, freshness }, location: locationPreferences,
+        offset, limit, filters: { query, company, location, workplace, freshness },
+        location: useSavedLocation ? locationPreferences : { preferredCountry: "", preferredRegions: [], locationScope: "worldwide", includeRemote: true },
       }), result => `${result.items.length} rows${result.locationFilteredInDatabase ? "" : " (fallback)"}`);
       const applicationStates = await timer.time("applications", () => getUserApplicationStates(user.id, catalogPage.items.map(job => job.id)));
       const jobs: DiscoveryJobCard[] = catalogPage.items.map(job => {

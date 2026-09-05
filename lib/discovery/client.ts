@@ -39,6 +39,7 @@ export async function fetchDiscoveryFeedPage(request: DiscoveryFeedRequest): Pro
     if (request.location?.trim()) params.set("location", request.location.trim());
     if (request.workplace) params.set("workplace", request.workplace);
     if (request.freshness) params.set("freshness", request.freshness);
+    if (request.useSavedLocation) params.set("useSavedLocation", "1");
     params.set("scope", request.scope);
     params.set("limit", String(request.limit));
     if (request.offset) params.set("offset", String(request.offset));

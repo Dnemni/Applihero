@@ -9,7 +9,7 @@ const db = () => {
   return supabaseAdmin as any;
 };
 
-type QueueRow = { id: string; discovery_job_id: string; source_id: string; attempts: number };
+type QueueRow = { id: string; discovery_job_id: string; source_id: string; attempts: number; max_attempts?: number };
 
 function schemaUnavailable(error: any) {
   return error?.code === "42P01" || error?.code === "PGRST202" || error?.code === "PGRST205";
@@ -17,6 +17,24 @@ function schemaUnavailable(error: any) {
 
 function messageFor(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Job detail enrichment failed");
+}
+
+export type EnrichmentFailure = {
+  message: string;
+  retryable: boolean;
+  kind: "transient" | "permanent" | "unavailable";
+};
+
+export function classifyEnrichmentFailure(error: unknown): EnrichmentFailure {
+  const message = messageFor(error);
+  const status = Number(message.match(/(?:returned|status)\s+(\d{3})(?:\D|$)/i)?.[1] || 0);
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+    return { message, retryable: false, kind: "permanent" };
+  }
+  if (/unavailable|empty detail|no detail/i.test(message)) {
+    return { message, retryable: true, kind: "unavailable" };
+  }
+  return { message, retryable: true, kind: "transient" };
 }
 
 export async function processDiscoveryEnrichment(limit = 20) {
@@ -77,22 +95,29 @@ export async function processDiscoveryEnrichment(limit = 20) {
       if (updateError) throw updateError;
       await database.from("discovery_enrichment_queue").update({
         status: "complete", attempts: (queueRow.attempts || 0) + 1,
-        locked_at: null, lock_token: null, last_error: null, updated_at: now,
+        locked_at: null, lock_token: null, last_error: null, failure_kind: null,
+        finished_at: now, updated_at: now,
       }).eq("id", queueRow.id).eq("lock_token", lockToken);
       completed += 1;
     } catch (error) {
       const attempts = (queueRow.attempts || 0) + 1;
+      const maxAttempts = Math.max(1, queueRow.max_attempts || 8);
+      const failure = classifyEnrichmentFailure(error);
+      const terminal = !failure.retryable || attempts >= maxAttempts;
       const retryMinutes = Math.min(24 * 60, 5 * Math.pow(2, Math.min(attempts - 1, 8)));
       const now = new Date().toISOString();
       await database.from("discovery_jobs").update({
-        enrichment_status: attempts >= 8 ? "failed" : "pending",
+        enrichment_status: terminal ? "failed" : "pending",
         enrichment_attempts: attempts,
-        enrichment_last_error: messageFor(error),
+        enrichment_last_error: failure.message,
       }).eq("id", queueRow.discovery_job_id);
       await database.from("discovery_enrichment_queue").update({
-        status: "failed", attempts,
+        status: terminal ? "dead" : "retry_wait", attempts,
         next_attempt_at: new Date(Date.now() + retryMinutes * 60_000).toISOString(),
-        locked_at: null, lock_token: null, last_error: messageFor(error), updated_at: now,
+        locked_at: null, lock_token: null, last_error: failure.message,
+        failure_kind: terminal && failure.retryable ? "exhausted" : failure.kind,
+        finished_at: terminal ? now : null,
+        updated_at: now,
       }).eq("id", queueRow.id).eq("lock_token", lockToken);
       failed += 1;
     }

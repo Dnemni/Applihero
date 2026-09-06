@@ -59,6 +59,8 @@ export async function runDiscoveryIngestionWorker(limit = 2) {
     let succeeded = false;
     let errorMessage: string | undefined;
     let summary: Record<string, unknown> = {};
+    const sourceLeaseToken = crypto.randomUUID();
+    let sourceLeaseAcquired = false;
     try {
       const { data: source, error } = await database.from("job_sources").select("*").eq("id", task.source_id).maybeSingle();
       if (error) throw error;
@@ -68,7 +70,28 @@ export async function runDiscoveryIngestionWorker(limit = 2) {
         succeeded = true;
         summary = { skipped: "source_disabled" };
       } else {
-        const result = await syncSource(source, { catalogOnly: true });
+        const { data: acquired, error: acquireError } = await database.rpc("acquire_discovery_source_lease", {
+          p_source_id: task.source_id,
+          p_lease_token: sourceLeaseToken,
+          p_lease_seconds: 480,
+        });
+        const leaseRpcUnavailable = acquireError?.code === "PGRST202" || acquireError?.code === "42883";
+        if (acquireError && !leaseRpcUnavailable) throw acquireError;
+        sourceLeaseAcquired = !acquireError && acquired === true;
+        if (!acquireError && !sourceLeaseAcquired) {
+          const { data: deferred, error: deferError } = await database.rpc("defer_discovery_ingestion_task", {
+            p_task_id: task.id,
+            p_lease_token: leaseToken,
+            p_delay_seconds: 60,
+            p_reason: "Source scan lease is busy",
+          });
+          if (deferError) throw deferError;
+          return deferred === true ? { taskId: task.id, sourceId: task.source_id, status: "deferred" as const } : null;
+        }
+        const result = await syncSource(source, {
+          catalogOnly: true,
+          ...(sourceLeaseAcquired ? { preclaimedScanLockToken: sourceLeaseToken } : {}),
+        });
         summary = {
           company: result.company,
           fetched: result.fetched,
@@ -95,6 +118,21 @@ export async function runDiscoveryIngestionWorker(limit = 2) {
     // A false result means the lease expired or a newer worker recovered it;
     // do not attempt a second write from this stale worker.
     if (finished !== true) return null;
+    if (succeeded) {
+      const { error: reconcileError } = await database.rpc("reconcile_discovery_source_tasks", { p_source_id: task.source_id });
+      if (reconcileError && reconcileError.code !== "PGRST202" && reconcileError.code !== "42883") {
+        console.error(`Unable to reconcile sibling discovery tasks for ${task.source_id}:`, reconcileError);
+      }
+    }
+    if (sourceLeaseAcquired) {
+      const { error: releaseError } = await database.rpc("release_discovery_source_lease", {
+        p_source_id: task.source_id,
+        p_lease_token: sourceLeaseToken,
+      });
+      if (releaseError && releaseError.code !== "PGRST202" && releaseError.code !== "42883") {
+        console.error(`Unable to release discovery source lease for ${task.source_id}:`, releaseError);
+      }
+    }
     return {
       taskId: task.id,
       sourceId: task.source_id,
@@ -111,6 +149,7 @@ export async function runDiscoveryIngestionWorker(limit = 2) {
     completed: results.filter(result => result.status === "succeeded").length,
     retried: results.filter(result => result.status === "retry_wait").length,
     failed: results.filter(result => result.status === "failed").length,
+    deferred: results.filter(result => result.status === "deferred").length,
     results,
   };
 }
@@ -152,6 +191,7 @@ export async function drainWith(
     completed: results.reduce((sum, result) => sum + result.completed, 0),
     retried: results.reduce((sum, result) => sum + result.retried, 0),
     failed: results.reduce((sum, result) => sum + result.failed, 0),
+    deferred: results.reduce((sum, result) => sum + result.deferred, 0),
     idlePolls: idle,
     exhaustedCapacity: claimed >= maxTasks,
     exhaustedBudget,

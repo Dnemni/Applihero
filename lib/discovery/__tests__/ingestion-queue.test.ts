@@ -25,7 +25,7 @@ test("queue drain stops before another claim when its wall-clock budget is exhau
   const result = await drainWith(async () => {
     calls += 1;
     clock += 60;
-    return { claimed: 1, completed: 1, retried: 0, failed: 0, results: [] };
+    return { claimed: 1, completed: 1, retried: 0, failed: 0, deferred: 0, results: [] };
   }, { budgetMs: 100, now: () => clock, idlePause: async () => undefined });
   assert.equal(calls, 2);
   assert.equal(result.claimed, 2);
@@ -50,4 +50,13 @@ test("operational migration reconciles superseded failed tasks without deleting 
   assert.match(migration, /task\.status IN \('queued', 'retry_wait', 'failed'\)/);
   assert.match(migration, /source\.last_successful_scan_at >= task\.scheduled_for/);
   assert.match(migration, /'reconciled', TRUE/);
+});
+
+test("source task lease migration defers collisions without consuming attempts", async () => {
+  const migration = await readFile(new URL("../../../supabase/migrations/20260906010000_add_discovery_source_task_leases.sql", import.meta.url), "utf8");
+  assert.match(migration, /acquire_discovery_source_lease/);
+  assert.match(migration, /scan_locked_until IS NULL OR source\.scan_locked_until < NOW\(\)/);
+  assert.match(migration, /attempts = GREATEST\(0, task\.attempts - 1\)/);
+  assert.match(migration, /task\.lease_token = p_lease_token/);
+  assert.match(migration, /reconcile_discovery_source_tasks/);
 });

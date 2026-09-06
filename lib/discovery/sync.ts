@@ -188,15 +188,14 @@ async function createInAppAlerts(subscription: Subscription, newRecommendations:
  * catalog sweep: jobs still get persisted and deduplicated even when nobody
  * follows the source yet. User matching and notifications remain opt-in.
  */
-export async function syncSource(source: any, options: { catalogOnly?: boolean } = {}): Promise<SyncResult> {
+export async function syncSource(source: any, options: { catalogOnly?: boolean; preclaimedScanLockToken?: string } = {}): Promise<SyncResult> {
   const database = db();
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
   const ingestionState = sourceSupportsIngestionState(source);
-  const scanLockToken = ingestionState ? crypto.randomUUID() : null;
-  await database.from("job_sources").update({ last_sync_started_at: startedAt }).eq("id", source.id);
+  const scanLockToken = ingestionState ? options.preclaimedScanLockToken || crypto.randomUUID() : null;
   try {
-    if (scanLockToken) {
+    if (scanLockToken && !options.preclaimedScanLockToken) {
       const { data: locked, error: lockError } = await database.from("job_sources").update({
         scan_lock_token: scanLockToken,
         scan_locked_until: new Date(Date.now() + 8 * 60_000).toISOString(),
@@ -208,6 +207,11 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
         return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started, error: "Source scan is already running" };
       }
     }
+    let startedQuery = database.from("job_sources").update({ last_sync_started_at: startedAt }).eq("id", source.id);
+    if (scanLockToken) startedQuery = startedQuery.eq("scan_lock_token", scanLockToken);
+    const { data: startedSource, error: startedError } = await startedQuery.select("id").maybeSingle();
+    if (startedError) throw startedError;
+    if (scanLockToken && !startedSource) throw new Error("Source scan lease expired before the scan started");
     const { data: subscriptions, error: subscriptionError } = await database
       .from("user_job_source_subscriptions")
       .select("user_id, subscribed_at, min_fit_score, profiles(resume_text, transcript_text, bio)")
@@ -216,12 +220,16 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
     if (subscriptionError) throw subscriptionError;
     if (!subscriptions?.length && !options.catalogOnly) {
       const now = new Date().toISOString();
-      await database.from("job_sources").update({
+      let skippedQuery = database.from("job_sources").update({
         last_sync_completed_at: now,
         last_sync_error: null,
         next_sync_at: new Date(Date.now() + 60 * 60_000).toISOString(),
         ...(scanLockToken ? { scan_lock_token: null, scan_locked_until: null } : {}),
       }).eq("id", source.id);
+      if (scanLockToken) skippedQuery = skippedQuery.eq("scan_lock_token", scanLockToken);
+      const { data: skippedSource, error: skippedError } = await skippedQuery.select("id").maybeSingle();
+      if (skippedError) throw skippedError;
+      if (scanLockToken && !skippedSource) throw new Error("Source scan lease expired before completion");
       return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started };
     }
 
@@ -514,7 +522,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
     // can still request a direct source scan, but should not permanently pull
     // the shared source into a more expensive cadence.
     const interval = Math.max(60, source.sync_interval_minutes || 60);
-    await database.from("job_sources").update({
+    let completedQuery = database.from("job_sources").update({
       last_sync_completed_at: now,
       last_sync_error: null,
       consecutive_failures: 0,
@@ -530,6 +538,10 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
         scan_locked_until: null,
       } : {}),
     }).eq("id", source.id);
+    if (scanLockToken) completedQuery = completedQuery.eq("scan_lock_token", scanLockToken);
+    const { data: completedSource, error: completedError } = await completedQuery.select("id").maybeSingle();
+    if (completedError) throw completedError;
+    if (scanLockToken && !completedSource) throw new Error("Source scan lease expired before completion");
     if (ingestionState) {
       const { error: telemetryError } = await database.from("discovery_scan_runs").insert({
         source_id: source.id,
@@ -566,12 +578,14 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
     const message = readableError(error);
     const failures = (source.consecutive_failures || 0) + 1;
     const retryMinutes = Math.min(240, Math.max(60, (source.sync_interval_minutes || 60) * Math.pow(2, Math.min(failures - 1, 4))));
-    await database.from("job_sources").update({
+    let failedQuery = database.from("job_sources").update({
       last_sync_error: message,
       consecutive_failures: failures,
       next_sync_at: new Date(Date.now() + retryMinutes * 60_000).toISOString(),
       ...(scanLockToken ? { scan_lock_token: null, scan_locked_until: null } : {}),
     }).eq("id", source.id);
+    if (scanLockToken) failedQuery = failedQuery.eq("scan_lock_token", scanLockToken);
+    await failedQuery;
     return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started, error: message };
   }
 }

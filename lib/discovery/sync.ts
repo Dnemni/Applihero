@@ -4,6 +4,7 @@ import { assessDiscoveryEligibility, getDiscoveryApplicantProfile } from "./elig
 import { applyDiscoveryEligibilityGate, buildQuickFit, MATCHER_VERSION } from "./matcher";
 import { hashText } from "./parser";
 import { quickFitEquals } from "./fit-cache";
+import { loadObservedSourceCache } from "./source-cache";
 import { discoveryLocationColumns } from "./location";
 import { discoveryJobsSupportLocationColumns } from "./repository";
 import { answersToMatchingContext, type DiscoveryAnswer } from "./facts";
@@ -148,7 +149,7 @@ function asCachedSourceJob(rawJob: NormalizedSourceJob, existing: any): Normaliz
     parsed_requirements: [],
     parser_version: existing.parser_version,
     content_hash: existing.content_hash,
-    raw_payload: rawJob.raw_payload || existing.raw_payload,
+    raw_payload: rawJob.raw_payload,
   };
 }
 
@@ -276,10 +277,9 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
         ? { ...source, config: { ...(source.config || {}), searchQueries: ["intern", "co-op", "student"], maxJobs: 500 } }
       : source;
     const { data: existingSourceJobs, error: existingSourceError } = await database.from("discovery_jobs")
-      .select("*").eq("source_id", source.id).order("discovered_at", { ascending: false }).limit(2_000);
+      .select("source_job_id").eq("source_id", source.id).order("discovered_at", { ascending: false }).limit(2_000);
     if (existingSourceError) throw discoverySyncStageError("load_source_catalog", existingSourceError);
-    const existingBySourceJob = new Map<string, any>((existingSourceJobs || []).map((job: any) => [String(job.source_job_id), job]));
-    const knownJobIds = new Set<string>(existingBySourceJob.keys());
+    const knownJobIds = new Set<string>((existingSourceJobs || []).map((job: any) => String(job.source_job_id)));
     const lastFullScanAt = ingestionState ? source.last_full_scan_at : source.last_sync_completed_at;
     const dueReconcile = !lastFullScanAt || Date.now() - new Date(lastFullScanAt).getTime() >= 24 * 60 * 60_000;
     const scanMode: SourceScanMode = !knownJobIds.size ? "bootstrap" : dueReconcile ? "reconcile" : "incremental";
@@ -310,6 +310,12 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       .slice(0, MAX_SOURCE_CATALOG_JOBS);
 
     const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters" || sourceForFetch.provider === "avature" || sourceForFetch.provider === "indexed_site" || sourceForFetch.provider === "career_site";
+    let existingBySourceJob: Map<string, any>;
+    try {
+      existingBySourceJob = await loadObservedSourceCache(database, source.id, newestSourceJobs.map(job => job.source_job_id), ingestionState);
+    } catch (error) {
+      throw discoverySyncStageError("load_observed_catalog_cache", error);
+    }
     const cachedSourceJobs = newestSourceJobs.map(job => asCachedSourceJob(job, existingBySourceJob.get(job.source_job_id)));
     // A provider's latest frontier is still fetched each hour, because not
     // every ATS exposes a reliable posted-after filter. Once it is in hand,

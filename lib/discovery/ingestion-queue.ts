@@ -69,6 +69,9 @@ export async function runDiscoveryIngestionWorker(limit = 2) {
       if (!source || !source.enabled) {
         succeeded = true;
         summary = { skipped: "source_disabled" };
+      } else if (source.last_successful_scan_at && new Date(source.last_successful_scan_at) >= new Date(task.scheduled_for)) {
+        succeeded = true;
+        summary = { skipped: "superseded_by_success", lastSuccessfulScanAt: source.last_successful_scan_at };
       } else {
         const { data: acquired, error: acquireError } = await database.rpc("acquire_discovery_source_lease", {
           p_source_id: task.source_id,

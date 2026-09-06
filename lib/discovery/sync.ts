@@ -56,6 +56,12 @@ function readableError(error: unknown): string {
   return String(error || "Discovery scan failed");
 }
 
+export function discoverySyncStageError(stage: string, error: unknown) {
+  const message = readableError(error);
+  if (/^\[[a-z0-9_]+\]\s/i.test(message)) return error instanceof Error ? error : new Error(message);
+  return new Error(`[${stage}] ${message}`, { cause: error });
+}
+
 function asDiscoveryJob(job: NormalizedSourceJob, source: any): DiscoveryJob {
   const now = new Date().toISOString();
   return {
@@ -69,7 +75,7 @@ function asDiscoveryJob(job: NormalizedSourceJob, source: any): DiscoveryJob {
   } as DiscoveryJob;
 }
 
-async function upsertInChunks(table: string, rows: any[], options: Record<string, unknown>) {
+async function upsertInChunks(table: string, rows: any[], options: Record<string, unknown>, stage = `upsert_${table}`) {
   // Discovery job rows can contain large descriptions and raw provider
   // payloads. The database's uniqueness constraints make retried and split
   // writes idempotent, so a temporarily expensive provider payload cannot
@@ -87,7 +93,7 @@ async function upsertInChunks(table: string, rows: any[], options: Record<string
           await write(chunk.slice(middle));
           return;
         }
-        throw error;
+        throw discoverySyncStageError(stage, error);
       }
       await new Promise(resolve => setTimeout(resolve, 250 + Math.floor(Math.random() * 150)));
     }
@@ -106,7 +112,7 @@ async function upsertChangedDiscoveryJobs(sourceId: string, rows: any[], ingesti
       .select(ingestionState ? "source_job_id,content_hash,listing_hash,status" : "source_job_id,content_hash,status")
       .eq("source_id", sourceId)
       .in("source_job_id", sourceJobIds);
-    if (error) throw error;
+    if (error) throw discoverySyncStageError("load_existing_catalog_rows", error);
     for (const job of data || []) existingByKey.set(job.source_job_id, job);
   }
 
@@ -117,7 +123,7 @@ async function upsertChangedDiscoveryJobs(sourceId: string, rows: any[], ingesti
     return !existing || existing.content_hash !== row.content_hash ||
       (ingestionState && existing.listing_hash !== row.listing_hash) || existing.status !== "open";
   });
-  await upsertInChunks("discovery_jobs", changed, { onConflict: "source_id,source_job_id" });
+  await upsertInChunks("discovery_jobs", changed, { onConflict: "source_id,source_job_id" }, "persist_catalog_jobs");
 }
 
 function sourceSupportsIngestionState(source: any) {
@@ -157,14 +163,14 @@ async function createInAppAlerts(subscription: Subscription, newRecommendations:
   }));
   const { error: candidateError } = await database.from("discovery_alert_candidates")
     .upsert(candidates, { onConflict: "user_id,discovery_job_id", ignoreDuplicates: true });
-  if (candidateError) throw candidateError;
+  if (candidateError) throw discoverySyncStageError("persist_alert_candidates", candidateError);
 
   const { data: pending, error: pendingError } = await database.from("discovery_alert_candidates")
     .select("id, fit_score, fit_band, discovery_jobs(id, title, company_name, location)")
     .eq("user_id", subscription.user_id)
     .is("notification_id", null)
     .order("created_at", { ascending: true });
-  if (pendingError) throw pendingError;
+  if (pendingError) throw discoverySyncStageError("load_alert_candidates", pendingError);
   const matching = (pending || []).filter((item: any) =>
     item.fit_band !== "likely_conflict" && item.fit_score !== null && item.fit_score >= subscription.min_fit_score
   );
@@ -177,10 +183,10 @@ async function createInAppAlerts(subscription: Subscription, newRecommendations:
     body: jobs.length === 1 ? `${jobs[0].title} at ${jobs[0].company_name}` : `New roles from ${Array.from(new Set(jobs.map((job: any) => job.company_name))).join(", ")}`,
     job_ids: jobs.map((job: any) => job.id),
   }).select("id").single();
-  if (notificationError) throw notificationError;
+  if (notificationError) throw discoverySyncStageError("persist_notification", notificationError);
   const { error: linkedError } = await database.from("discovery_alert_candidates")
     .update({ notification_id: notification.id }).in("id", batch.map((item: any) => item.id));
-  if (linkedError) throw linkedError;
+  if (linkedError) throw discoverySyncStageError("link_alert_notification", linkedError);
 }
 
 /**
@@ -194,6 +200,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
   const startedAt = new Date(started).toISOString();
   const ingestionState = sourceSupportsIngestionState(source);
   const scanLockToken = ingestionState ? options.preclaimedScanLockToken || crypto.randomUUID() : null;
+  let telemetryMode: SourceScanMode = source.last_successful_scan_at ? "incremental" : "bootstrap";
   try {
     if (scanLockToken && !options.preclaimedScanLockToken) {
       const { data: locked, error: lockError } = await database.from("job_sources").update({
@@ -202,7 +209,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       }).eq("id", source.id)
         .or(`scan_locked_until.is.null,scan_locked_until.lt.${startedAt}`)
         .select("id").maybeSingle();
-      if (lockError) throw lockError;
+      if (lockError) throw discoverySyncStageError("acquire_source_lease", lockError);
       if (!locked) {
         return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started, error: "Source scan is already running" };
       }
@@ -210,14 +217,14 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
     let startedQuery = database.from("job_sources").update({ last_sync_started_at: startedAt }).eq("id", source.id);
     if (scanLockToken) startedQuery = startedQuery.eq("scan_lock_token", scanLockToken);
     const { data: startedSource, error: startedError } = await startedQuery.select("id").maybeSingle();
-    if (startedError) throw startedError;
+    if (startedError) throw discoverySyncStageError("mark_source_started", startedError);
     if (scanLockToken && !startedSource) throw new Error("Source scan lease expired before the scan started");
     const { data: subscriptions, error: subscriptionError } = await database
       .from("user_job_source_subscriptions")
       .select("user_id, subscribed_at, min_fit_score, profiles(resume_text, transcript_text, bio)")
       .eq("source_id", source.id)
       .eq("enabled", true);
-    if (subscriptionError) throw subscriptionError;
+    if (subscriptionError) throw discoverySyncStageError("load_source_subscriptions", subscriptionError);
     if (!subscriptions?.length && !options.catalogOnly) {
       const now = new Date().toISOString();
       let skippedQuery = database.from("job_sources").update({
@@ -228,7 +235,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       }).eq("id", source.id);
       if (scanLockToken) skippedQuery = skippedQuery.eq("scan_lock_token", scanLockToken);
       const { data: skippedSource, error: skippedError } = await skippedQuery.select("id").maybeSingle();
-      if (skippedError) throw skippedError;
+      if (skippedError) throw discoverySyncStageError("complete_unfollowed_source", skippedError);
       if (scanLockToken && !skippedSource) throw new Error("Source scan lease expired before completion");
       return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started };
     }
@@ -238,7 +245,9 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
     if (subscriberIds.length) {
       const { data, error: answerError } = await database.from("user_discovery_answers")
         .select("*").in("user_id", subscriberIds).eq("reuse_approved", true);
-      if (answerError && answerError.code !== "42P01" && answerError.code !== "PGRST205") throw answerError;
+      if (answerError && answerError.code !== "42P01" && answerError.code !== "PGRST205") {
+        throw discoverySyncStageError("load_discovery_answers", answerError);
+      }
       answerRows = data || [];
     }
     const answersByUser = new Map<string, DiscoveryAnswer[]>();
@@ -268,19 +277,25 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       : source;
     const { data: existingSourceJobs, error: existingSourceError } = await database.from("discovery_jobs")
       .select("*").eq("source_id", source.id).order("discovered_at", { ascending: false }).limit(2_000);
-    if (existingSourceError) throw existingSourceError;
+    if (existingSourceError) throw discoverySyncStageError("load_source_catalog", existingSourceError);
     const existingBySourceJob = new Map<string, any>((existingSourceJobs || []).map((job: any) => [String(job.source_job_id), job]));
     const knownJobIds = new Set<string>(existingBySourceJob.keys());
     const lastFullScanAt = ingestionState ? source.last_full_scan_at : source.last_sync_completed_at;
     const dueReconcile = !lastFullScanAt || Date.now() - new Date(lastFullScanAt).getTime() >= 24 * 60 * 60_000;
     const scanMode: SourceScanMode = !knownJobIds.size ? "bootstrap" : dueReconcile ? "reconcile" : "incremental";
-    const scan = await fetchSourceJobsWithMeta(sourceForFetch, {
-      mode: scanMode,
-      knownJobIds,
-      scanState: ingestionState ? source.scan_state : {},
-      lastFullScanAt,
-      maxJobs: MAX_SOURCE_CATALOG_JOBS,
-    });
+    telemetryMode = scanMode;
+    let scan: Awaited<ReturnType<typeof fetchSourceJobsWithMeta>>;
+    try {
+      scan = await fetchSourceJobsWithMeta(sourceForFetch, {
+        mode: scanMode,
+        knownJobIds,
+        scanState: ingestionState ? source.scan_state : {},
+        lastFullScanAt,
+        maxJobs: MAX_SOURCE_CATALOG_JOBS,
+      });
+    } catch (error) {
+      throw discoverySyncStageError("fetch_provider_jobs", error);
+    }
     const fetched = scan.jobs;
     const includeTitleTerms = Array.isArray(source.config?.includeTitleTerms)
       ? source.config.includeTitleTerms.map((term: unknown) => String(term).toLowerCase().trim()).filter(Boolean) : [];
@@ -418,7 +433,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
           consecutive_misses: 0,
         }).eq("source_id", source.id)
           .in("source_job_id", persistedJobs.slice(index, index + 50).map(job => job.source_job_id));
-        if (seenError) throw seenError;
+        if (seenError) throw discoverySyncStageError("touch_verified_catalog_jobs", seenError);
       }
     }
     let storedJobs: any[] = [];
@@ -429,7 +444,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
           .select(ingestionState ? "id, source_job_id, title, company_name, location, first_seen_at, bootstrap_observed, enrichment_status" : "id, source_job_id, title, company_name, location")
           .eq("source_id", source.id)
           .in("source_job_id", sourceJobIds.slice(index, index + 50));
-        if (storedError) throw storedError;
+        if (storedError) throw discoverySyncStageError("load_persisted_catalog_jobs", storedError);
         storedJobs.push(...(data || []));
       }
     }
@@ -451,7 +466,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       if (queueRows.length) await upsertInChunks("discovery_enrichment_queue", queueRows, {
         onConflict: "discovery_job_id",
         ignoreDuplicates: true,
-      });
+      }, "enqueue_job_enrichment");
       if (subscriberProfiles.length && queueRows.length) {
         const { error: priorityError } = await database.from("discovery_enrichment_queue")
           .update({ priority: 5, updated_at: now })
@@ -460,7 +475,9 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
           .gt("priority", 5);
         // During a rolling deployment the old status constraint does not know
         // retry_wait yet. Catalog persistence must remain available meanwhile.
-        if (priorityError && priorityError.code !== "22P02") throw priorityError;
+        if (priorityError && priorityError.code !== "22P02") {
+          throw discoverySyncStageError("prioritize_job_enrichment", priorityError);
+        }
       }
       queuedEnrichmentCount = queueRows.length;
     }
@@ -471,7 +488,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       const { data: existingRecommendations, error: existingError } = await database.from("user_job_recommendations")
         .select("discovery_job_id,fit_score,fit_band,eligibility_status,quick_fit,active")
         .eq("user_id", item.subscription.user_id).eq("source_id", source.id);
-      if (existingError) throw existingError;
+      if (existingError) throw discoverySyncStageError("load_user_recommendations", existingError);
       const existingIds = new Set((existingRecommendations || []).map((row: any) => row.discovery_job_id));
       const existingByJobId = new Map((existingRecommendations || []).map((row: any) => [row.discovery_job_id, row]));
       const recommendationRows = evaluated.catalog.flatMap(entry => {
@@ -502,7 +519,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
           !quickFitEquals(existing.quick_fit, row.quick_fit);
       });
       if (changedRecommendations.length) {
-        await upsertInChunks("user_job_recommendations", changedRecommendations, { onConflict: "user_id,discovery_job_id" });
+        await upsertInChunks("user_job_recommendations", changedRecommendations, { onConflict: "user_id,discovery_job_id" }, "persist_user_recommendations");
       }
       // Low-confidence catalog roles are useful when the user deliberately
       // searches a company, but should never create a proactive alert.
@@ -540,7 +557,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
     }).eq("id", source.id);
     if (scanLockToken) completedQuery = completedQuery.eq("scan_lock_token", scanLockToken);
     const { data: completedSource, error: completedError } = await completedQuery.select("id").maybeSingle();
-    if (completedError) throw completedError;
+    if (completedError) throw discoverySyncStageError("complete_source_scan", completedError);
     if (scanLockToken && !completedSource) throw new Error("Source scan lease expired before completion");
     if (ingestionState) {
       const { error: telemetryError } = await database.from("discovery_scan_runs").insert({
@@ -585,7 +602,23 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       ...(scanLockToken ? { scan_lock_token: null, scan_locked_until: null } : {}),
     }).eq("id", source.id);
     if (scanLockToken) failedQuery = failedQuery.eq("scan_lock_token", scanLockToken);
-    await failedQuery;
+    const { error: failedSourceError } = await failedQuery;
+    if (failedSourceError) console.error(`Unable to persist source failure for ${source.id}:`, failedSourceError);
+    if (ingestionState) {
+      const stage = message.match(/^\[([a-z0-9_]+)\]/i)?.[1] || "unknown";
+      const { error: telemetryError } = await database.from("discovery_scan_runs").insert({
+        source_id: source.id,
+        started_at: startedAt,
+        finished_at: new Date().toISOString(),
+        mode: telemetryMode,
+        provider: source.provider,
+        status: "failed",
+        duration_ms: Date.now() - started,
+        metadata: { stage },
+        error: message,
+      });
+      if (telemetryError) console.error(`Unable to save failed scan telemetry for ${source.id}:`, telemetryError);
+    }
     return { sourceId: source.id, company: source.company_name, careerUrl: source.career_url, discovered: 0, verified: 0, matched: 0, fallbackImported: 0, fetched: 0, rejected: 0, durationMs: Date.now() - started, error: message };
   }
 }

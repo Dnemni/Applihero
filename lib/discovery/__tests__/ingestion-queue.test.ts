@@ -60,3 +60,11 @@ test("source task lease migration defers collisions without consuming attempts",
   assert.match(migration, /task\.lease_token = p_lease_token/);
   assert.match(migration, /reconcile_discovery_source_tasks/);
 });
+
+test("digest claiming keeps overlapping finalizers mutually exclusive", async () => {
+  const migration = await readFile(new URL("../../../supabase/migrations/20260827000000_add_discovery_ingestion_task_queue.sql", import.meta.url), "utf8");
+  assert.match(migration, /claim_discovery_digest_preferences/);
+  assert.match(migration, /digest_locked_until IS NULL OR p\.digest_locked_until < NOW\(\)/);
+  assert.match(migration, /FOR UPDATE SKIP LOCKED/);
+  assert.match(migration, /digest_lock_token = p_lock_token/);
+});

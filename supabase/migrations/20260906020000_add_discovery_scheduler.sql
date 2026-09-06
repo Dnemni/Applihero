@@ -132,7 +132,7 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'applihero-discovery-maintenance',
   '*/5 * * * *',
-  $$SELECT public.invoke_discovery_service('/api/cron/discover/finalize?enrichmentLimit=1&digestLimit=25&rematchBudgetMs=45000', 60000);$$
+  $$SELECT public.invoke_discovery_service('/api/cron/discover/finalize?digestLimit=25&rematchBudgetMs=45000&rematchUserLimit=20&rematchPerUserLimit=250', 60000);$$
 );
 
 CREATE OR REPLACE FUNCTION public.get_discovery_scheduler_health()

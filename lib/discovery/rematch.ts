@@ -271,8 +271,13 @@ export async function processDiscoveryRematches(options: { userLimit?: number; p
   const userIds = orderedUserIds.slice(0, userLimit);
   const summaries: RematchSummary[] = [];
   let skippedForBudget = 0;
-  for (const userId of userIds) {
-    if (Date.now() - started > budgetMs) { skippedForBudget += 1; continue; }
+  let failedUsers = 0;
+  for (let index = 0; index < userIds.length; index += 1) {
+    const userId = userIds[index];
+    if (Date.now() - started > budgetMs) {
+      skippedForBudget = userIds.length - index;
+      break;
+    }
     try {
       summaries.push(await rematchUserRecommendations(userId, { limit: perUserLimit }));
       if (cursorAvailable) {
@@ -281,16 +286,20 @@ export async function processDiscoveryRematches(options: { userLimit?: number; p
         if (cursorError) cursorAvailable = false;
       }
     } catch (caught) {
+      failedUsers += 1;
       console.error(`Discovery rematch failed for ${userId}:`, caught);
     }
   }
   return {
     users: userIds.length,
     processed: summaries.length,
+    failedUsers,
     skippedForBudget,
     evaluated: summaries.reduce((sum, item) => sum + item.evaluated, 0),
     updated: summaries.reduce((sum, item) => sum + item.updated, 0),
     remaining: summaries.reduce((sum, item) => sum + item.remaining, 0),
+    hasMore: skippedForBudget > 0 || summaries.some(item => item.remaining > 0),
+    subscribedUsers: subscribedUserIds.length,
     durationMs: Date.now() - started,
   };
 }

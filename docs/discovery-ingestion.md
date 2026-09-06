@@ -6,7 +6,9 @@ page.
 
 ## Pipeline
 
-1. A first-party hourly trigger calls `GET /api/cron/discover/dispatch` with `CRON_SECRET`.
+1. Supabase Cron calls `GET /api/cron/discover/dispatch` every five minutes with
+   the Vault-held `CRON_SECRET`. Hourly bucket idempotency makes the repeated
+   check cheap while preventing a skipped external scheduler event.
 2. The dispatcher inserts one idempotent task per enabled `job_sources` row in
    `discovery_ingestion_tasks` for the current UTC hour.
 3. Several short `GET /api/cron/discover/worker` invocations atomically claim
@@ -17,9 +19,10 @@ page.
 5. Existing descriptions are reused. New Workday/Oracle detail pages are
    hydrated in a small inline batch; the remainder enter
    `discovery_enrichment_queue`.
-6. The independent finalizer calls the enrichment worker, which claims queue rows with `FOR UPDATE SKIP LOCKED`, retries
-   failures with exponential backoff, parses requirements deterministically, and
-   updates the canonical `discovery_jobs` row.
+6. Dedicated enrichment workers claim queue rows with `FOR UPDATE SKIP LOCKED`,
+   recover expired processing leases, retry transient failures with exponential
+   backoff, terminalize permanent failures, parse requirements deterministically,
+   and update the canonical `discovery_jobs` row.
 7. Enriched jobs enter the existing per-user eligibility/matching flow. A source
    bootstrap seeds the catalog without generating a burst of new-job alerts.
 8. The finalizer also runs the bounded rematch step
@@ -80,7 +83,11 @@ The migrations are
 `supabase/migrations/20260827000000_add_discovery_ingestion_task_queue.sql`,
 `supabase/migrations/20260902000000_harden_discovery_queue_operations.sql`, and
 `supabase/migrations/20260904000000_add_discovery_location_columns.sql`, and
-`supabase/migrations/20260905000000_add_discovery_rematch_cursor.sql`.
+`supabase/migrations/20260905000000_add_discovery_rematch_cursor.sql`,
+`supabase/migrations/20260906000000_harden_discovery_enrichment_queue.sql`,
+`supabase/migrations/20260906010000_add_discovery_source_task_leases.sql`,
+`supabase/migrations/20260906020000_add_discovery_scheduler.sql`, and
+`supabase/migrations/20260906030000_add_discovery_operations_snapshot.sql`.
 Together they add observation timestamps, source telemetry, detail enrichment,
 the durable hourly task queue, stale-task reconciliation, and normalized
 geography with the indexes the feed queries use. The rematch cursor makes a
@@ -129,39 +136,71 @@ No separate backend deployment is needed. The queue lives in Supabase and the
 private worker HTTP handlers are regular Vercel routes under the same
 `applihero.com` deployment:
 
-1. Apply `20260827000000_add_discovery_ingestion_task_queue.sql` to the same
-   Supabase project used by the production site.
-2. In Vercel, set `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, and
+1. In Vercel, set `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, and
    one high-entropy `CRON_SECRET` for Production and Preview as appropriate.
    Do not expose `CRON_SECRET` in `NEXT_PUBLIC_*` variables.
-3. In GitHub, set `DISCOVERY_CRON_SECRET` to the exact same value. The workflow
-   calls `https://www.applihero.com/api/cron/discover/dispatch`, then its worker
-   pool and finalizer. GitHub Actions is the hourly scheduler; Vercel does not
-   need a public cron configuration for this flow.
-4. The project is on Vercel's Hobby plan, which only permits cron schedules
+2. Deploy the application routes. Code tolerates the new RPCs being unavailable
+   during this rolling-deployment window.
+3. In Supabase Vault, create `discovery_cron_base_url` with the value
+   `https://www.applihero.com`, and create `discovery_cron_secret` with the exact
+   Vercel `CRON_SECRET`. Never paste the service-role key into Vault for this.
+4. Apply all migrations through `20260906030000`. Supabase enables `pg_cron`,
+   `pg_net`, and Vault, and installs six staggered jobs. A missing Vault value
+   records a configuration error instead of making an unauthenticated call.
+5. In GitHub, set `DISCOVERY_CRON_SECRET` to the same value. GitHub is a
+   three-hour fallback and manual recovery runner, not the primary clock.
+6. The project is on Vercel's Hobby plan, which only permits cron schedules
    that run once per day; hourly expressions fail deployment with "Hobby
-   accounts are limited to daily cron jobs". `vercel.json` therefore carries a
-   single daily dispatch as a safety net (the worker lanes under
-   `/api/cron/discover/worker/[lane]` stay available for a Pro plan or an
-   external scheduler). GitHub Actions is the hourly scheduler and runs two
-   staggered schedules (`:00` and `:30`) because its scheduler has been seen
-   skipping slots for hours; the dispatcher is idempotent per hour bucket so
-   the second run only drains leftover work. Each of four worker lanes stops
-   claiming after 230 seconds and may call the route up to three times; that
-   remains inside the workflow's 12-minute limit while resuming a nonempty queue.
-5. Push and deploy `.github/workflows/discovery-sync.yml` together with the
-   application changes, then run the workflow manually once. Confirm
-   `/api/cron/discover/status` reports queued work decreasing and successful
-   tasks increasing.
+   accounts are limited to daily cron jobs". `vercel.json` therefore retains a
+   single daily dispatch as a final safety net. All private handlers remain in
+   the same `applihero.com` deployment.
+7. Run `npm run check:discovery-scheduler`, wait five minutes, then run
+   `npm run audit:discovery-operations`. Confirm recent scheduler calls are 2xx,
+   queue age is falling, and no source has two live scans.
 
 The endpoints are intentionally hidden service routes, not a second backend
-site: `/api/cron/discover/{dispatch,worker,finalize,status}`. They reject all
+site: `/api/cron/discover/{dispatch,worker,enrichment,finalize,status}`. They reject all
 requests without `Authorization: Bearer <CRON_SECRET>`.
+
+### Scheduler cadence
+
+- minute `0` of each five-minute cycle: idempotent dispatch/maintenance;
+- minutes `1` and `2`: two source lanes, each bounded to 100 seconds;
+- minutes `4` and `0`: two 45-second enrichment calls, outside source writes;
+- every five minutes: digest/rematch maintenance and queue reconciliation.
+
+The request ledger and `net._http_response` are summarized by
+`get_discovery_scheduler_health`. Invocation audit rows are retained for seven
+days. Supabase documents `pg_cron` + `pg_net` + Vault as its supported pattern
+for authenticated scheduled HTTP calls.
+
+### Rotate the cron secret without losing work
+
+1. Generate a new random secret of at least 32 bytes.
+2. In Vercel, set `CRON_SECRET_PREVIOUS` to the current secret and replace
+   `CRON_SECRET` with the new secret; redeploy production.
+3. Update `discovery_cron_secret` in Supabase Vault with `vault.update_secret`,
+   then replace GitHub's `DISCOVERY_CRON_SECRET` with the new value.
+4. Run the scheduler check and confirm new requests are 2xx.
+5. Remove `CRON_SECRET_PREVIOUS` from Vercel and redeploy.
+
+Only the dedicated cron secret is rotated here. Supabase service-role and user
+session tokens are not scheduler credentials and should never be copied into a
+cron header.
+
+### Pause and recover
+
+Pause the six `applihero-discovery-*` jobs from Supabase Cron when provider or
+database pressure requires it; durable queue rows remain intact. Resume the
+jobs, run dispatch once, and use the GitHub workflow manually to add bounded
+drain capacity. Do not delete task or enrichment rows to clear an alert.
 
 ## Rollout and operating checks
 
 - Use `GET /api/cron/discover/status` with `CRON_SECRET` to view task states,
-  oldest queued age, recent provider failures, and least-fresh enabled sources.
+  oldest queued age, scheduler heartbeat, enrichment lifecycle/dead-letter
+  counts, rematch freshness, recent provider failure stages, and least-fresh
+  enabled sources.
 - `POST /api/cron/discover/status` with `{ "taskId": "..." }` safely retries a
   failed task. The next worker claims it normally.
 - Start with the existing catalog and watch `discovery_scan_runs` for duration,

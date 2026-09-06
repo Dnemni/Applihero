@@ -19,6 +19,7 @@ test("enrichment migration caps claims and separates retry from terminal failure
   assert.match(migration, /ADD COLUMN IF NOT EXISTS max_attempts/);
   assert.match(migration, /'retry_wait', 'dead'/);
   assert.match(migration, /queue\.attempts < queue\.max_attempts/);
+  assert.match(migration, /queue\.status = 'processing' AND queue\.locked_at < NOW\(\) - INTERVAL '10 minutes'/);
   assert.match(migration, /reconcile_discovery_enrichment_queue/);
 });
 

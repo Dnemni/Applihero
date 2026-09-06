@@ -20,7 +20,8 @@
     "measure:discovery-requests": "tsx scripts/measure-discovery-requests.ts",
     "backfill:discovery-locations": "tsx scripts/backfill-discovery-locations.ts",
     "verify:discovery-location-filter": "tsx scripts/verify-discovery-location-filter.ts",
-    "check:discovery-scheduler": "tsx scripts/check-discovery-scheduler.ts"
+    "check:discovery-scheduler": "tsx scripts/check-discovery-scheduler.ts",
+    "audit:discovery-operations": "tsx scripts/audit-discovery-operations.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

@@ -2,7 +2,16 @@
 
 ## Decision
 
-Build a durable ingestion queue in Supabase/Postgres and retain GitHub Actions as the hourly external trigger. This is the fastest path to reliable catalog-wide ingestion because it reuses the working provider adapters, source locks, normalized jobs, and Vercel deployment already in AppliHero.
+Build a durable ingestion queue in Supabase/Postgres and use Supabase Cron as the
+durable clock. Supabase calls the existing private Vercel routes on the same
+AppliHero deployment; GitHub Actions remains a three-hour fallback and manual
+recovery runner. This reuses the working provider adapters, source locks,
+normalized jobs, and Vercel deployment without adding another backend service.
+
+This supersedes the original Milestone 1 assumption that GitHub Actions could
+provide the primary hourly trigger. Production observation showed scheduled
+workflows could be delayed for more than an hour, so the database that owns the
+queue now also owns the schedule and invocation ledger.
 
 Do **not** introduce a separate queue vendor, OpenSearch, or a browser crawler in this milestone. Those can be evaluated after the system has reliable source-level metrics and a meaningful operating load.
 
@@ -22,7 +31,8 @@ A database-backed queue gives each company scan an idempotent work item. Multipl
 
 ```mermaid
 flowchart LR
-  Scheduler["GitHub Actions hourly trigger"] --> Dispatch["Dispatch endpoint"]
+  Scheduler["Supabase Cron + pg_net"] --> Dispatch["Dispatch endpoint"]
+  Fallback["GitHub fallback/manual run"] --> Dispatch
   Dispatch --> Tasks[("discovery_ingestion_tasks")]
   Workers["Short worker invocations"] --> Tasks
   Tasks --> Providers["Official ATS adapters"]
@@ -77,7 +87,10 @@ Add a cron-protected dispatch route that:
 - requeues expired running tasks;
 - returns counts only, never a large per-source payload.
 
-GitHub Actions becomes a small dispatcher plus a fixed worker matrix. The dispatcher remains safe to run more than once.
+Supabase Cron invokes the dispatcher every five minutes. GitHub Actions retains
+a small dispatcher plus worker matrix for fallback/manual recovery. The
+dispatcher remains safe to run more than once because its work is bucketed and
+idempotent.
 
 Acceptance criteria:
 
@@ -94,7 +107,10 @@ Add a cron-protected worker route that:
 - records source-level result telemetry and marks the task complete, retryable, or failed;
 - stops before the Vercel duration limit, leaving remaining work queued.
 
-The hourly GitHub workflow invokes several workers in parallel. It should not decide which companies each worker scans; workers claim the next available task.
+Several staggered Supabase Cron invocations run workers in parallel. The
+fallback GitHub workflow can add bounded capacity, but neither scheduler decides
+which companies a worker scans; workers atomically claim the next available
+task.
 
 Acceptance criteria:
 

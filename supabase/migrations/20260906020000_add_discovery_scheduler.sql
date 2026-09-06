@@ -107,25 +107,25 @@ SELECT cron.schedule(
 
 SELECT cron.schedule(
   'applihero-discovery-source-a',
-  '1-59/3 * * * *',
+  '1-59/5 * * * *',
   $$SELECT public.invoke_discovery_service('/api/cron/discover/worker?limit=1&drain=1&maxTasks=18&budgetMs=100000&lane=db-a', 115000);$$
 );
 
 SELECT cron.schedule(
   'applihero-discovery-source-b',
-  '2-59/3 * * * *',
+  '2-59/5 * * * *',
   $$SELECT public.invoke_discovery_service('/api/cron/discover/worker?limit=1&drain=1&maxTasks=18&budgetMs=100000&lane=db-b', 115000);$$
 );
 
 SELECT cron.schedule(
   'applihero-discovery-enrichment-even',
-  '*/2 * * * *',
+  '4-59/5 * * * *',
   $$SELECT public.invoke_discovery_service('/api/cron/discover/enrichment?batchSize=4&maxItems=40&budgetMs=45000&lane=db-even', 55000);$$
 );
 
 SELECT cron.schedule(
   'applihero-discovery-enrichment-odd',
-  '1-59/2 * * * *',
+  '*/5 * * * *',
   $$SELECT public.invoke_discovery_service('/api/cron/discover/enrichment?batchSize=4&maxItems=40&budgetMs=45000&lane=db-odd', 55000);$$
 );
 

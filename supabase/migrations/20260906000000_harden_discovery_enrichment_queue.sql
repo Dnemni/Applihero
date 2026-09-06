@@ -59,6 +59,10 @@ CREATE INDEX idx_discovery_enrichment_due
   ON public.discovery_enrichment_queue(priority, next_attempt_at, created_at)
   WHERE status IN ('pending', 'retry_wait', 'failed');
 
+CREATE INDEX IF NOT EXISTS idx_discovery_enrichment_expired_processing
+  ON public.discovery_enrichment_queue(locked_at)
+  WHERE status = 'processing';
+
 CREATE INDEX IF NOT EXISTS idx_discovery_enrichment_lifecycle
   ON public.discovery_enrichment_queue(status, updated_at DESC);
 
@@ -119,10 +123,12 @@ BEGIN
   WITH due AS (
     SELECT queue.id
     FROM public.discovery_enrichment_queue queue
-    WHERE queue.status IN ('pending', 'retry_wait', 'failed')
+    WHERE (
+        queue.status IN ('pending', 'retry_wait', 'failed')
+        OR (queue.status = 'processing' AND queue.locked_at < NOW() - INTERVAL '10 minutes')
+      )
       AND queue.attempts < queue.max_attempts
       AND queue.next_attempt_at <= NOW()
-      AND (queue.locked_at IS NULL OR queue.locked_at < NOW() - INTERVAL '10 minutes')
     ORDER BY queue.priority ASC, queue.next_attempt_at ASC, queue.created_at ASC
     FOR UPDATE SKIP LOCKED
     LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 10), 100))

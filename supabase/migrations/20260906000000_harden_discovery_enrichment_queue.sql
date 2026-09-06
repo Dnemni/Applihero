@@ -62,6 +62,16 @@ CREATE INDEX idx_discovery_enrichment_due
 CREATE INDEX IF NOT EXISTS idx_discovery_enrichment_lifecycle
   ON public.discovery_enrichment_queue(status, updated_at DESC);
 
+-- Missing details from followed companies affect Matches and alerts. Move
+-- them ahead of general-catalog hydration without dropping catalog work.
+UPDATE public.discovery_enrichment_queue queue
+SET priority = LEAST(queue.priority, 5), updated_at = NOW()
+WHERE queue.status IN ('pending', 'retry_wait', 'failed')
+  AND EXISTS (
+    SELECT 1 FROM public.user_job_source_subscriptions subscription
+    WHERE subscription.source_id = queue.source_id AND subscription.enabled = TRUE
+  );
+
 CREATE OR REPLACE FUNCTION public.reconcile_discovery_enrichment_queue()
 RETURNS TABLE(completed_count INTEGER, dead_count INTEGER)
 LANGUAGE plpgsql

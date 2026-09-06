@@ -143,6 +143,14 @@ export async function POST(request: NextRequest) {
       // make the UI roll it back; the next shared scan will converge the rows.
       console.error(`Discovery follow seed failed for ${sourceId}:`, seedError);
     }
+    const { error: priorityError } = await db().from("discovery_enrichment_queue")
+      .update({ priority: 5, updated_at: new Date().toISOString() })
+      .eq("source_id", sourceId)
+      .in("status", ["pending", "retry_wait", "failed"])
+      .gt("priority", 5);
+    if (priorityError && priorityError.code !== "42P01" && priorityError.code !== "PGRST205" && priorityError.code !== "22P02") {
+      console.error("Unable to prioritize followed-source enrichment:", priorityError);
+    }
     return NextResponse.json({ sourceId, subscribed: true, seeded });
   } catch (error) {
     const status = error instanceof ApiAuthError ? error.status : 400;

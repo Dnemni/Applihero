@@ -444,6 +444,16 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean }
         onConflict: "discovery_job_id",
         ignoreDuplicates: true,
       });
+      if (subscriberProfiles.length && queueRows.length) {
+        const { error: priorityError } = await database.from("discovery_enrichment_queue")
+          .update({ priority: 5, updated_at: now })
+          .eq("source_id", source.id)
+          .in("status", ["pending", "retry_wait", "failed"])
+          .gt("priority", 5);
+        // During a rolling deployment the old status constraint does not know
+        // retry_wait yet. Catalog persistence must remain available meanwhile.
+        if (priorityError && priorityError.code !== "22P02") throw priorityError;
+      }
       queuedEnrichmentCount = queueRows.length;
     }
 

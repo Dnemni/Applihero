@@ -37,22 +37,11 @@ export function classifyEnrichmentFailure(error: unknown): EnrichmentFailure {
   return { message, retryable: true, kind: "transient" };
 }
 
-export async function processDiscoveryEnrichment(limit = 20) {
-  const database = db();
-  const lockToken = crypto.randomUUID();
-  const { data: claimed, error: claimError } = await database.rpc("claim_discovery_enrichment", {
-    p_limit: Math.max(1, Math.min(limit, 100)),
-    p_lock_token: lockToken,
-  });
-  if (claimError) {
-    if (schemaUnavailable(claimError)) return { processed: 0, completed: 0, failed: 0, unavailable: true };
-    throw claimError;
-  }
+type EnrichmentResult = "completed" | "retried" | "dead";
 
-  let completed = 0;
-  let failed = 0;
-  for (const queueRow of (claimed || []) as QueueRow[]) {
-    try {
+async function processClaimedEnrichment(queueRow: QueueRow, lockToken: string): Promise<EnrichmentResult> {
+  const database = db();
+  try {
       const { data: job, error: jobError } = await database.from("discovery_jobs").select("*")
         .eq("id", queueRow.discovery_job_id).single();
       if (jobError) throw jobError;
@@ -64,6 +53,9 @@ export async function processDiscoveryEnrichment(limit = 20) {
         { provider: source.provider as JobProvider, config: source.config || {} },
         job as NormalizedSourceJob,
       ));
+      if (!hydrated.description?.trim()) {
+        throw new Error("Job detail is unavailable: provider returned an empty detail");
+      }
       const now = new Date().toISOString();
       const writeLocationColumns = await discoveryJobsSupportLocationColumns();
       const { error: updateError } = await database.from("discovery_jobs").update({
@@ -98,7 +90,7 @@ export async function processDiscoveryEnrichment(limit = 20) {
         locked_at: null, lock_token: null, last_error: null, failure_kind: null,
         finished_at: now, updated_at: now,
       }).eq("id", queueRow.id).eq("lock_token", lockToken);
-      completed += 1;
+      return "completed";
     } catch (error) {
       const attempts = (queueRow.attempts || 0) + 1;
       const maxAttempts = Math.max(1, queueRow.max_attempts || 8);
@@ -119,8 +111,68 @@ export async function processDiscoveryEnrichment(limit = 20) {
         finished_at: terminal ? now : null,
         updated_at: now,
       }).eq("id", queueRow.id).eq("lock_token", lockToken);
-      failed += 1;
+      return terminal ? "dead" : "retried";
     }
+}
+
+export async function processDiscoveryEnrichment(limit = 4) {
+  const database = db();
+  const lockToken = crypto.randomUUID();
+  const { data: reconciled, error: reconcileError } = await database.rpc("reconcile_discovery_enrichment_queue");
+  if (reconcileError && !schemaUnavailable(reconcileError)) throw reconcileError;
+  const { data: claimed, error: claimError } = await database.rpc("claim_discovery_enrichment", {
+    p_limit: Math.max(1, Math.min(limit, 8)),
+    p_lock_token: lockToken,
+  });
+  if (claimError) {
+    if (schemaUnavailable(claimError)) return { processed: 0, completed: 0, retried: 0, dead: 0, failed: 0, unavailable: true };
+    throw claimError;
   }
-  return { processed: (claimed || []).length, completed, failed, unavailable: false };
+
+  const results = await Promise.all(((claimed || []) as QueueRow[]).map(row => processClaimedEnrichment(row, lockToken)));
+  const retried = results.filter(result => result === "retried").length;
+  const dead = results.filter(result => result === "dead").length;
+  return {
+    processed: results.length,
+    completed: results.filter(result => result === "completed").length,
+    retried,
+    dead,
+    failed: retried + dead,
+    reconciled: reconcileError ? null : (Array.isArray(reconciled) ? reconciled[0] : reconciled),
+    unavailable: false,
+  };
+}
+
+type EnrichmentBatchResult = Awaited<ReturnType<typeof processDiscoveryEnrichment>>;
+
+export async function drainEnrichmentWith(
+  runner: () => Promise<EnrichmentBatchResult>,
+  options: { maxItems?: number; budgetMs?: number; now?: () => number } = {},
+) {
+  const maxItems = Math.max(1, Math.min(options.maxItems || 40, 100));
+  const budgetMs = Math.max(1, Math.min(options.budgetMs || 45_000, 90_000));
+  const now = options.now || Date.now;
+  const started = now();
+  const batches: EnrichmentBatchResult[] = [];
+  let processed = 0;
+  while (processed < maxItems && now() - started < budgetMs) {
+    const result = await runner();
+    batches.push(result);
+    processed += result.processed;
+    if (!result.processed || result.unavailable) break;
+  }
+  return {
+    processed,
+    completed: batches.reduce((sum, result) => sum + result.completed, 0),
+    retried: batches.reduce((sum, result) => sum + result.retried, 0),
+    dead: batches.reduce((sum, result) => sum + result.dead, 0),
+    exhaustedCapacity: processed >= maxItems,
+    exhaustedBudget: now() - started >= budgetMs,
+    unavailable: batches.some(result => result.unavailable),
+  };
+}
+
+export async function drainDiscoveryEnrichment(options: { maxItems?: number; budgetMs?: number; batchSize?: number } = {}) {
+  const batchSize = Math.max(1, Math.min(options.batchSize || 4, 8));
+  return drainEnrichmentWith(() => processDiscoveryEnrichment(batchSize), options);
 }

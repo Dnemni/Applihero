@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
     if (request.nextUrl.searchParams.get("drain") === "1") {
       return NextResponse.json(await drainDiscoveryIngestionWorker({
         maxTasks: boundedInteger(request.nextUrl.searchParams.get("maxTasks"), 34, 40),
+        budgetMs: boundedInteger(request.nextUrl.searchParams.get("budgetMs"), 230_000, 280_000),
       }));
     }
     const limit = boundedInteger(request.nextUrl.searchParams.get("limit"), 2, 3);

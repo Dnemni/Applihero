@@ -60,11 +60,12 @@ but run from frequent, bounded maintenance calls.
 
 1. Supabase `pg_cron` calls dispatch every five minutes. Dispatch remains
    idempotent per UTC hour and reconciles superseded tasks on every call.
-2. Two staggered source-worker calls run every three minutes. Each call has a
-   wall-clock budget below its schedule interval and acquires a source lease
+2. Two staggered source-worker calls run in each five-minute cycle. Each call
+   has a wall-clock budget below the next cycle and acquires a source lease
    before invoking the existing adapter.
-3. Two staggered enrichment-worker calls run every two minutes. They process
-   only due rows below their attempt ceiling and stop on a time budget.
+3. Two enrichment-worker calls run later in that five-minute cycle, after the
+   source-write window. They process only due rows below their attempt ceiling
+   and stop on a time budget.
 4. Maintenance runs every five minutes for digest delivery and rotating
    rematches. Each subsystem retains its own lease/idempotency boundary.
 5. GitHub Actions remains manually runnable and provides a slower fallback. It

@@ -2,12 +2,9 @@ name: Sync discovery jobs
 
 on:
   schedule:
-    # GitHub's scheduler has been observed skipping hourly slots for several
-    # hours at a time. Two staggered schedules give each hour two chances;
-    # the dispatcher is idempotent per hour bucket, so a duplicate run only
-    # drains whatever the first one left.
-    - cron: "0 * * * *"
-    - cron: "30 * * * *"
+    # Supabase pg_cron is the primary clock. This slower schedule is a recovery
+    # net and the workflow remains manually runnable by an operator.
+    - cron: "17 */3 * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -31,34 +28,47 @@ jobs:
     name: Claim discovery work ${{ matrix.worker }}
     needs: dispatch
     runs-on: ubuntu-latest
-    # Four jobs, one task per call: only four sources run at once. Each job
+    # Two jobs, one task per call: only two sources run at once. Each job
     # keeps claiming until the hour's queue is empty, which provides capacity
     # for the full catalog rather than only one small batch per schedule.
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        # Four in-flight sources keeps provider and Postgres writes below the
-        # contention observed at 24 concurrent scans.
-        worker: [1, 2, 3, 4]
+        worker: [1, 2]
     steps:
       - name: Drain bounded source tasks at safe concurrency
         env:
           DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
-          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/worker?limit=1
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/worker?limit=1&drain=1&maxTasks=18&budgetMs=100000&lane=github-${{ matrix.worker }}
         run: |
           test -n "$DISCOVERY_CRON_SECRET"
           for attempt in 1 2 3; do
-            response=$(curl --fail-with-body --silent --show-error --max-time 300 --retry 1 --retry-all-errors \
-              --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL&drain=1")
+            response=$(curl --fail-with-body --silent --show-error --max-time 120 --retry 1 --retry-all-errors \
+              --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL")
             echo "$response"
             claimed=$(echo "$response" | jq -r '.claimed // 0')
             if [ "$claimed" -eq 0 ]; then break; fi
           done
 
+  enrichment:
+    name: Drain job detail enrichment
+    needs: worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Process bounded detail work
+        env:
+          DISCOVERY_CRON_SECRET: ${{ secrets.DISCOVERY_CRON_SECRET }}
+          DISCOVERY_CRON_URL: https://www.applihero.com/api/cron/discover/enrichment?batchSize=4&maxItems=100&budgetMs=85000&lane=github
+        run: |
+          test -n "$DISCOVERY_CRON_SECRET"
+          curl --fail-with-body --silent --show-error --max-time 100 --retry 1 --retry-all-errors \
+            --header "Authorization: Bearer $DISCOVERY_CRON_SECRET" "$DISCOVERY_CRON_URL"
+
   finalize:
-    name: Finalize discovery enrichment and digests
-    needs: [dispatch, worker]
+    name: Finalize discovery digests and rematches
+    needs: [dispatch, worker, enrichment]
     if: ${{ always() && needs.dispatch.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3

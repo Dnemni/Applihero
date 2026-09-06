@@ -16,14 +16,19 @@ export async function GET(request: NextRequest) {
     // Count per status in the database: a plain select is capped at the API's
     // max-rows (1,000) and silently under-reports once the task log grows.
     const TASK_STATUSES = ["queued", "running", "retry_wait", "succeeded", "failed"];
-    const [statusCounts, oldest, failures, sources, recentRuns] = await Promise.all([
+    const [statusCounts, oldest, failures, sources, recentRuns, operations, scheduler] = await Promise.all([
       Promise.all(TASK_STATUSES.map(status => database.from("discovery_ingestion_tasks").select("id", { count: "exact", head: true }).eq("status", status).then((result: any) => ({ status, count: result.count || 0, error: result.error })))),
       database.from("discovery_ingestion_tasks").select("created_at").in("status", ["queued", "retry_wait"]).order("created_at", { ascending: true }).limit(1).maybeSingle(),
-      database.from("discovery_scan_runs").select("provider,error,started_at,job_sources(company_name)").eq("status", "failed").order("started_at", { ascending: false }).limit(20),
+      database.from("discovery_scan_runs").select("provider,error,metadata,started_at,job_sources(company_name)").eq("status", "failed").order("started_at", { ascending: false }).limit(20),
       database.from("job_sources").select("id,company_name,provider,last_successful_scan_at,consecutive_failures,last_sync_error").eq("enabled", true).order("last_successful_scan_at", { ascending: true, nullsFirst: true }),
       database.from("discovery_scan_runs").select("source_id,status").order("started_at", { ascending: false }).limit(1000),
+      database.rpc("get_discovery_operations_snapshot"),
+      database.rpc("get_discovery_scheduler_health"),
     ]);
     for (const response of [...statusCounts, oldest, failures, sources, recentRuns]) if (response.error) throw response.error;
+    for (const response of [operations, scheduler]) {
+      if (response.error && response.error.code !== "PGRST202" && response.error.code !== "42883") throw response.error;
+    }
     const counts = Object.fromEntries(statusCounts.filter(item => item.count > 0).map(item => [item.status, item.count])) as Record<string, number>;
     const failuresByProvider = (failures.data || []).reduce((result: Record<string, number>, failure: any) => {
       result[failure.provider] = (result[failure.provider] || 0) + 1;
@@ -49,9 +54,23 @@ export async function GET(request: NextRequest) {
       };
     });
     const oldestQueuedAgeSeconds = oldest.data?.created_at ? Math.max(0, Math.floor((Date.now() - new Date(oldest.data.created_at).getTime()) / 1000)) : null;
+    const operationsSnapshot = operations.error ? null : operations.data;
+    const schedulerHealth = scheduler.error ? null : scheduler.data;
+    const latestSchedulerAt = schedulerHealth?.recentInvocations?.[0]?.requestedAt || null;
+    const schedulerAgeSeconds = latestSchedulerAt ? Math.max(0, Math.floor((Date.now() - new Date(latestSchedulerAt).getTime()) / 1000)) : null;
+    const enrichmentOldestDueAt = operationsSnapshot?.enrichmentOldestDueAt || null;
+    const enrichmentOldestAgeSeconds = enrichmentOldestDueAt ? Math.max(0, Math.floor((Date.now() - new Date(enrichmentOldestDueAt).getTime()) / 1000)) : null;
+    const enrichmentDeadCount = Number(operationsSnapshot?.enrichmentCounts?.dead || 0);
+    const rematchOldestAt = operationsSnapshot?.rematch?.oldestRematchedAt || null;
+    const rematchOldestAgeSeconds = rematchOldestAt ? Math.max(0, Math.floor((Date.now() - new Date(rematchOldestAt).getTime()) / 1000)) : null;
     const alerts = buildDiscoveryOperationalAlerts({
       oldestQueuedAgeSeconds,
       failedTaskCount: counts.failed || 0,
+      ...(schedulerHealth ? { schedulerAgeSeconds, schedulerConfigured: schedulerHealth.configured === true } : {}),
+      enrichmentOldestAgeSeconds,
+      enrichmentDeadCount,
+      rematchOldestAgeSeconds,
+      rematchNeverCount: Number(operationsSnapshot?.rematch?.neverRematchedUsers || 0),
       sources: sources.data || [],
     });
     return NextResponse.json({
@@ -61,6 +80,16 @@ export async function GET(request: NextRequest) {
       thresholds: DISCOVERY_OPERATION_THRESHOLDS,
       alerts,
       failuresByProvider,
+      supersededTaskCount: operationsSnapshot?.supersededTaskCount ?? null,
+      enrichment: operationsSnapshot ? {
+        counts: operationsSnapshot.enrichmentCounts || {},
+        oldestDueAt: enrichmentOldestDueAt,
+        oldestDueAgeSeconds: enrichmentOldestAgeSeconds,
+        deadByKind: operationsSnapshot.enrichmentDeadByKind || {},
+        deadByProvider: operationsSnapshot.enrichmentDeadByProvider || {},
+      } : null,
+      rematch: operationsSnapshot?.rematch || null,
+      scheduler: schedulerHealth ? { ...schedulerHealth, latestInvocationAgeSeconds: schedulerAgeSeconds } : null,
       recentSourceFailures: failures.data || [],
       sourceHealth,
       leastFreshEnabledSources: sourceHealth.slice(0, 20),

@@ -81,6 +81,25 @@ database acknowledgement cannot be made one atomic transaction by a lease.
 
 ## Local database verification
 
+Final verification: 60 discovery tests, TypeScript and production build passed.
+The isolated Postgres suite passed concurrent claims, interrupted retry cap,
+workspace/snapshot/closure behavior and capacity RPC checks. All four tested
+protected local endpoints returned 401 without credentials.
+
+One authenticated read-only round against the local production build and live
+Supabase returned HTTP 200 for all nine requests. Matches reported 210 total
+roles (50/100 per page); All roles reported 31,795; engineer search reported
+11,381. Matches took 2.35 s cold and 1.18 s subsequently. All roles took 6.40 s
+on the first request (6.09 s in the catalog database span), then 0.61 s for the
+next page size. Search took 0.55 s, sources 0.38 s, notifications 0.21 s and
+preferences 0.23 s. This is not proof that latency outliers are fixed. Observe
+database pressure and query plans after the scanner changes deploy.
+
+Browser navigation verified the login boundary on production and local, but
+there was no authenticated browser session. Authenticated API measurements are
+not a substitute for completed manual UI testing. No live emails were sent,
+no production schema was changed by this test pass, and no commits were pushed.
+
 `scripts/test-discovery-postgres.ts` takes an isolated Unix socket directory
 named `/private/tmp/applihero-db-test.*` on port 55439. It creates a fresh test
 database, installs the real queue/workspace/capacity functions against a minimal

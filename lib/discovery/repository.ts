@@ -342,7 +342,7 @@ export const DISCOVERY_CARD_FIELDS = [
   "location", "workplace_type", "employment_type", "departments", "source_url", "apply_url",
   "source_published_at", "source_published_precision", "source_published_source", "source_updated_at",
   "application_deadline", "discovered_at", "first_seen_at", "last_seen_at", "last_verified_at", "status",
-  "parser_version", "content_hash", "job_sources(provider,company_name,external_key)",
+  "parser_version", "content_hash",
 ].join(",");
 
 export const MATCH_CANDIDATE_CAP = 5_000;

@@ -312,7 +312,8 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
     const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters" || sourceForFetch.provider === "avature" || sourceForFetch.provider === "indexed_site" || sourceForFetch.provider === "career_site";
     let existingBySourceJob: Map<string, any>;
     try {
-      existingBySourceJob = await loadObservedSourceCache(database, source.id, newestSourceJobs.map(job => job.source_job_id), ingestionState);
+      existingBySourceJob = await loadObservedSourceCache(database, source.id, newestSourceJobs.map(job => job.source_job_id), ingestionState,
+        newestSourceJobs.filter(job => !job.description?.trim()).map(job => job.source_job_id));
     } catch (error) {
       throw discoverySyncStageError("load_observed_catalog_cache", error);
     }
@@ -324,7 +325,7 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
     // outside that frontier.
     const workItemIds = new Set(cachedSourceJobs.filter(job => {
       const existing = existingBySourceJob.get(job.source_job_id);
-      return !existing || existing.status !== "open" || !existing.description ||
+      return !existing || existing.status !== "open" || !job.description ||
         (ingestionState && Boolean(job.listing_hash) && existing.listing_hash !== job.listing_hash) ||
         (Boolean(job.description) && existing.content_hash !== job.content_hash);
     }).map(job => job.source_job_id));

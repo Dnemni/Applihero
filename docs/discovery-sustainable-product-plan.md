@@ -45,6 +45,13 @@ for an already saved workspace.
 
 ## Acceptance and rollout
 
+Implementation review added a sixth correction after a real local Postgres
+probe proved interrupted enrichment claims left `attempts` at zero. The additive
+September 6 05:00 migration charges the attempt at claim time and terminalizes
+expired exhausted claims. Queue-wide enrichment reconciliation now runs once
+per drain invocation rather than before every four-item batch. See
+`discovery-capacity-runbook.md` for measured samples, validation and rollout.
+
 Run discovery tests and TypeScript after functional commits, then a production
 build. Exercise production health without manually sending emails. Browser test
 the authenticated feed and workspace when an existing session is available;

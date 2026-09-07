@@ -9,9 +9,18 @@ if (!/^\/private\/tmp\/applihero-db-test\.[A-Za-z0-9]+$/.test(socket)) throw new
 const run = promisify(execFile);
 const args = ["-h", socket, "-p", "55439", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-Atq"];
 const sql = async (query: string) => (await run("psql", [...args, "-c", query])).stdout.trim();
+const testDatabase = "discovery_test_" + randomUUID().replaceAll("-", "");
+let createdDatabase = false;
 async function main() {
+  await sql(`CREATE DATABASE ${testDatabase}`);
+  createdDatabase = true;
+  args[5] = testDatabase;
   await sql(`
-    CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+    DO $$ BEGIN
+      IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF;
+      IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF;
+      IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role; END IF;
+    END $$;
     CREATE TABLE job_sources(id uuid PRIMARY KEY, enabled boolean DEFAULT true, scan_lock_token uuid, scan_locked_until timestamptz, last_successful_scan_at timestamptz);
     CREATE TABLE user_discovery_preferences(user_id uuid PRIMARY KEY, email_enabled boolean DEFAULT true, next_digest_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
     CREATE TABLE user_job_source_subscriptions(user_id uuid, source_id uuid, enabled boolean DEFAULT true);
@@ -26,6 +35,7 @@ async function main() {
     "20260906010000_add_discovery_source_task_leases.sql",
     "20260906040000_add_atomic_discovery_workspace.sql",
     "20260906050000_count_interrupted_enrichment_attempts.sql",
+    "20260906060000_add_discovery_capacity_snapshot.sql",
   ]) await run("psql", [...args, "-f", `supabase/migrations/${migration}`]);
   const user = randomUUID(), source = randomUUID(), job = randomUUID();
   await sql(`INSERT INTO job_sources(id) VALUES ('${source}'); INSERT INTO discovery_jobs(id,title,company_name,description) VALUES ('${job}','Role','Company','Original saved description'); INSERT INTO user_discovery_preferences(user_id) VALUES ('${user}');`);
@@ -57,6 +67,15 @@ async function main() {
   await sql(`UPDATE job_sources SET last_successful_scan_at=now(); UPDATE discovery_ingestion_tasks SET status='failed',lease_token=null,lease_expires_at=null;`);
   assert.equal(await sql("SELECT reconcile_discovery_ingestion_tasks()"), "1");
   assert.equal(await sql("SELECT has_function_privilege('authenticated','public.start_discovery_workspace(uuid,uuid)','EXECUTE')"), "f");
+  const capacity = JSON.parse(await sql("SELECT get_discovery_capacity_snapshot()"));
+  assert.ok(capacity.databaseBytes > 0);
+  assert.ok(capacity.relations.some((row: any) => row.table === "discovery_jobs" && row.totalBytes > 0));
+  assert.equal(await sql("SELECT has_function_privilege('authenticated','public.get_discovery_capacity_snapshot()','EXECUTE')"), "f");
   console.log("PASS: concurrent dispatch, task/source/digest/enrichment claims, atomic workspace creation, closed-role continuity, snapshot preservation, reconciliation and RPC permissions");
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
+  if (createdDatabase) {
+    args[5] = "postgres";
+    await sql(`DROP DATABASE ${testDatabase}`);
+  }
+});

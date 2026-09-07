@@ -11,13 +11,14 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const user = await requireApiUser(request);
-    const [job, recommendation, hasBackground, background] = await Promise.all([
+    const [job, recommendation, hasBackground, background, application] = await Promise.all([
       getDiscoveryJob(params.id, { ensureParsing: false }),
       getUserRecommendationFit(user.id, params.id),
       hasUserBackground(user.id),
       getUserBackground(user.id, params.id),
+      getUserApplicationState(user.id, params.id),
     ]);
-    if (!job || job.status === "closed") return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    if (!job || (job.status === "closed" && !application)) return NextResponse.json({ error: "Job not found" }, { status: 404 });
     const profileHash = hashText(background);
     const stored = recommendation?.quick_fit;
     const fitIsCurrent = isQuickFitCurrent(stored, { matcherVersion: MATCHER_VERSION, profileHash, jobHash: job.content_hash });
@@ -30,7 +31,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       matcherVersion: MATCHER_VERSION,
     });
 
-    const application = await getUserApplicationState(user.id, job.id);
     return NextResponse.json({
       job,
       quickFit,

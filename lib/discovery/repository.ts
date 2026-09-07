@@ -221,7 +221,10 @@ export async function getUserApplicationStates(userId: string, discoveryJobIds: 
   if (!discoveryJobIds.length) return new Map<string, { id: string; status: string; lastTouchedAt: string }>();
   const { data, error } = await db().from("jobs")
     .select("id,discovery_job_id,status,last_touched_at")
-    .eq("user_id", userId).in("discovery_job_id", discoveryJobIds);
+    .eq("user_id", userId).in("discovery_job_id", discoveryJobIds)
+    // Map retains the final row: choose the oldest existing workspace just as
+    // start_discovery_workspace does, without deleting historical duplicates.
+    .order("created_at", { ascending: false }).order("id", { ascending: false });
   if (error) throw error;
   return new Map((data || []).map((row: any) => [row.discovery_job_id, {
     id: row.id, status: row.status, lastTouchedAt: row.last_touched_at,

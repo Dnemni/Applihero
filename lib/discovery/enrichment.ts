@@ -9,7 +9,11 @@ const db = () => {
   return supabaseAdmin as any;
 };
 
-type QueueRow = { id: string; discovery_job_id: string; source_id: string; attempts: number; max_attempts?: number };
+type QueueRow = { id: string; discovery_job_id: string; source_id: string; attempts: number; max_attempts?: number; claimed_attempt?: number | null };
+
+export function enrichmentAttempt(row: { attempts: number; claimed_attempt?: number | null }) {
+  return row.claimed_attempt ?? (row.attempts || 0) + 1;
+}
 
 function schemaUnavailable(error: any) {
   return error?.code === "42P01" || error?.code === "PGRST202" || error?.code === "PGRST205";
@@ -85,25 +89,27 @@ async function processClaimedEnrichment(queueRow: QueueRow, lockToken: string): 
         enriched_at: now,
       }).eq("id", job.id);
       if (updateError) throw updateError;
-      await database.from("discovery_enrichment_queue").update({
-        status: "complete", attempts: (queueRow.attempts || 0) + 1,
+      const { error: finishError } = await database.from("discovery_enrichment_queue").update({
+        status: "complete", attempts: enrichmentAttempt(queueRow),
         locked_at: null, lock_token: null, last_error: null, failure_kind: null,
         finished_at: now, updated_at: now,
       }).eq("id", queueRow.id).eq("lock_token", lockToken);
+      if (finishError) throw finishError;
       return "completed";
     } catch (error) {
-      const attempts = (queueRow.attempts || 0) + 1;
+      const attempts = enrichmentAttempt(queueRow);
       const maxAttempts = Math.max(1, queueRow.max_attempts || 8);
       const failure = classifyEnrichmentFailure(error);
       const terminal = !failure.retryable || attempts >= maxAttempts;
       const retryMinutes = Math.min(24 * 60, 5 * Math.pow(2, Math.min(attempts - 1, 8)));
       const now = new Date().toISOString();
-      await database.from("discovery_jobs").update({
+      const { error: jobFailureError } = await database.from("discovery_jobs").update({
         enrichment_status: terminal ? "failed" : "pending",
         enrichment_attempts: attempts,
         enrichment_last_error: failure.message,
       }).eq("id", queueRow.discovery_job_id);
-      await database.from("discovery_enrichment_queue").update({
+      if (jobFailureError) throw jobFailureError;
+      const { error: failureError } = await database.from("discovery_enrichment_queue").update({
         status: terminal ? "dead" : "retry_wait", attempts,
         next_attempt_at: new Date(Date.now() + retryMinutes * 60_000).toISOString(),
         locked_at: null, lock_token: null, last_error: failure.message,
@@ -111,14 +117,16 @@ async function processClaimedEnrichment(queueRow: QueueRow, lockToken: string): 
         finished_at: terminal ? now : null,
         updated_at: now,
       }).eq("id", queueRow.id).eq("lock_token", lockToken);
+      if (failureError) throw failureError;
       return terminal ? "dead" : "retried";
     }
 }
 
-export async function processDiscoveryEnrichment(limit = 4) {
+export async function processDiscoveryEnrichment(limit = 4, options: { reconcile?: boolean } = {}) {
   const database = db();
   const lockToken = crypto.randomUUID();
-  const { data: reconciled, error: reconcileError } = await database.rpc("reconcile_discovery_enrichment_queue");
+  const { data: reconciled, error: reconcileError } = options.reconcile === false
+    ? { data: null, error: null } : await database.rpc("reconcile_discovery_enrichment_queue");
   if (reconcileError && !schemaUnavailable(reconcileError)) throw reconcileError;
   const { data: claimed, error: claimError } = await database.rpc("claim_discovery_enrichment", {
     p_limit: Math.max(1, Math.min(limit, 8)),
@@ -174,5 +182,10 @@ export async function drainEnrichmentWith(
 
 export async function drainDiscoveryEnrichment(options: { maxItems?: number; budgetMs?: number; batchSize?: number } = {}) {
   const batchSize = Math.max(1, Math.min(options.batchSize || 4, 8));
-  return drainEnrichmentWith(() => processDiscoveryEnrichment(batchSize), options);
+  let firstBatch = true;
+  return drainEnrichmentWith(() => {
+    const reconcile = firstBatch;
+    firstBatch = false;
+    return processDiscoveryEnrichment(batchSize, { reconcile });
+  }, options);
 }

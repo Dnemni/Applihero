@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { classifyEnrichmentFailure, drainEnrichmentWith } from "../enrichment";
+import { classifyEnrichmentFailure, drainEnrichmentWith, enrichmentAttempt } from "../enrichment";
+
+test("enrichment counts charged claims once while supporting the previous claim RPC", () => {
+  assert.equal(enrichmentAttempt({ attempts: 3, claimed_attempt: 3 }), 3);
+  assert.equal(enrichmentAttempt({ attempts: 3 }), 4);
+});
 
 test("enrichment classifies permanent and retryable provider failures", () => {
   assert.deepEqual(classifyEnrichmentFailure(new Error("Workday careers source returned 403")), {

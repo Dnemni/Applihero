@@ -6,7 +6,8 @@ import { hashText } from "./parser";
 import { quickFitEquals } from "./fit-cache";
 import { loadObservedSourceCache } from "./source-cache";
 import { discoveryLocationColumns } from "./location";
-import { discoveryJobsSupportLocationColumns } from "./repository";
+import { storeDiscoveryJobContent } from "./content-store";
+import { discoveryJobsSupportLocationColumns, discoveryJobsSupportR2ContentColumns } from "./repository";
 import { answersToMatchingContext, type DiscoveryAnswer } from "./facts";
 import type { DiscoveryJob, QuickFit } from "./types";
 
@@ -312,8 +313,9 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
     const detailProvider = sourceForFetch.provider === "workday" || sourceForFetch.provider === "oracle" || sourceForFetch.provider === "eightfold" || sourceForFetch.provider === "smartrecruiters" || sourceForFetch.provider === "avature" || sourceForFetch.provider === "indexed_site" || sourceForFetch.provider === "career_site";
     let existingBySourceJob: Map<string, any>;
     try {
+      const supportsR2Content = await discoveryJobsSupportR2ContentColumns();
       existingBySourceJob = await loadObservedSourceCache(database, source.id, newestSourceJobs.map(job => job.source_job_id), ingestionState,
-        newestSourceJobs.filter(job => !job.description?.trim()).map(job => job.source_job_id));
+        newestSourceJobs.filter(job => !job.description?.trim()).map(job => job.source_job_id), supportsR2Content);
     } catch (error) {
       throw discoverySyncStageError("load_observed_catalog_cache", error);
     }
@@ -444,11 +446,14 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       }
     }
     let storedJobs: any[] = [];
+    const supportsR2Content = await discoveryJobsSupportR2ContentColumns();
     if (sourceCatalog.size) {
       const sourceJobIds = Array.from(sourceCatalog.keys());
       for (let index = 0; index < sourceJobIds.length; index += 50) {
         const { data, error: storedError } = await database.from("discovery_jobs")
-          .select(ingestionState ? "id, source_job_id, title, company_name, location, first_seen_at, bootstrap_observed, enrichment_status" : "id, source_job_id, title, company_name, location")
+          .select(ingestionState
+            ? `id, source_job_id, title, company_name, location, content_hash${supportsR2Content ? ", content_storage, content_ref" : ""}, first_seen_at, bootstrap_observed, enrichment_status`
+            : `id, source_job_id, title, company_name, location, content_hash${supportsR2Content ? ", content_storage, content_ref" : ""}`)
           .eq("source_id", source.id)
           .in("source_job_id", sourceJobIds.slice(index, index + 50));
         if (storedError) throw discoverySyncStageError("load_persisted_catalog_jobs", storedError);
@@ -456,6 +461,33 @@ export async function syncSource(source: any, options: { catalogOnly?: boolean; 
       }
     }
     const storedByKey = new Map(storedJobs.map((job: any) => [job.source_job_id, job]));
+
+    // Additive R2 dual-write. A content-store outage must not drop an employer
+    // scan while Supabase is still the source of truth; the later verified
+    // backfill is what makes R2 canonical before any large columns are pruned.
+    for (const job of sourceCatalog.values()) {
+      const stored = storedByKey.get(job.source_job_id) as any;
+      if (!supportsR2Content || !stored || !job.description?.trim()) continue;
+      if (stored.content_storage === "r2" && stored.content_ref && stored.content_hash === job.content_hash) continue;
+      try {
+        const content = await storeDiscoveryJobContent({
+          jobId: stored.id,
+          contentHash: job.content_hash,
+          content: { description: job.description, description_html: job.description_html, raw_payload: job.raw_payload },
+        });
+        if (!content) continue;
+        const { error: contentError } = await database.from("discovery_jobs").update({
+          content_storage: content.storage,
+          content_ref: content.ref,
+          content_bytes: content.bytes,
+          content_stored_at: content.storedAt,
+        }).eq("id", stored.id);
+        if (contentError) throw contentError;
+        storedByKey.set(job.source_job_id, { ...stored, content_storage: content.storage, content_ref: content.ref });
+      } catch (error) {
+        console.error("Discovery R2 dual-write failed; retaining Supabase content:", error);
+      }
+    }
 
     let queuedEnrichmentCount = 0;
     if (ingestionState) {

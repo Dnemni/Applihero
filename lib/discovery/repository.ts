@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase/client";
 import type { DiscoveryJob } from "./types";
 import { answersToMatchingContext, type DiscoveryAnswer } from "./facts";
 import { hashText, parseJobRequirements, REQUIREMENTS_PARSER_VERSION } from "./parser";
+import { loadDiscoveryJobContent } from "./content-store";
 
 const db = () => {
   if (!supabaseAdmin) throw new Error("Supabase admin client is not configured");
@@ -32,6 +33,17 @@ export async function withQueryTimeout<T>(builder: { abortSignal: (signal: Abort
   }
 }
 
+let discoveryR2ContentColumns: boolean | null = null;
+
+/** Allows code and additive schema migration to roll out in either order. */
+export async function discoveryJobsSupportR2ContentColumns() {
+  if (discoveryR2ContentColumns !== null) return discoveryR2ContentColumns;
+  const { error } = await db().from("discovery_jobs").select("content_storage,content_ref").limit(1);
+  if (!error) return (discoveryR2ContentColumns = true);
+  if (["42703", "PGRST204", "PGRST205"].includes(error.code)) return (discoveryR2ContentColumns = false);
+  throw error;
+}
+
 async function ensureCurrentParsing(job: DiscoveryJob): Promise<DiscoveryJob> {
   if (job.parser_version === REQUIREMENTS_PARSER_VERSION) return job;
   const parsedRequirements = parseJobRequirements(job.description || "");
@@ -51,6 +63,19 @@ async function ensureCurrentParsing(job: DiscoveryJob): Promise<DiscoveryJob> {
   return { ...job, parsed_requirements: parsedRequirements, parser_version: REQUIREMENTS_PARSER_VERSION, content_hash: contentHash };
 }
 
+async function hydrateExternalDiscoveryContent(job: DiscoveryJob): Promise<DiscoveryJob> {
+  if (job.content_storage !== "r2" || !job.content_ref) return job;
+  try {
+    const content = await loadDiscoveryJobContent(job.content_ref);
+    // During dual-write, Supabase remains a safe fallback if an object has not
+    // reached R2 yet or credentials are absent in a rolling deployment.
+    return content ? { ...job, ...content } : job;
+  } catch (error) {
+    if (job.description) return job;
+    throw new Error(`Discovery job content is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function getDiscoveryJob(id: string, options: { ensureParsing?: boolean } = {}): Promise<DiscoveryJob | null> {
   const { data, error } = await db()
     .from("discovery_jobs")
@@ -59,7 +84,8 @@ export async function getDiscoveryJob(id: string, options: { ensureParsing?: boo
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return options.ensureParsing === false ? data as DiscoveryJob : ensureCurrentParsing(data as DiscoveryJob);
+  const job = await hydrateExternalDiscoveryContent(data as DiscoveryJob);
+  return options.ensureParsing === false ? job : ensureCurrentParsing(job);
 }
 
 export async function getUserDiscoveryAnswers(userId: string, jobId?: string): Promise<DiscoveryAnswer[]> {

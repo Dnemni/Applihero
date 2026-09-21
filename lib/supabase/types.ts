@@ -170,6 +170,10 @@ export interface Database {
           parsed_requirements: Json;
           parser_version: string;
           content_hash: string;
+          content_storage: 'supabase' | 'r2';
+          content_ref: string | null;
+          content_stored_at: string | null;
+          content_bytes: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -198,6 +202,10 @@ export interface Database {
           parsed_requirements?: Json;
           parser_version?: string;
           content_hash: string;
+          content_storage?: 'supabase' | 'r2';
+          content_ref?: string | null;
+          content_stored_at?: string | null;
+          content_bytes?: number | null;
           created_at?: string;
           updated_at?: string;
         };

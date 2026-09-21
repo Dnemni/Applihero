@@ -1,8 +1,9 @@
 import { supabaseAdmin } from "@/lib/supabase/client";
 import { hydrateSourceJob, prepareSourceJob, type NormalizedSourceJob } from "./connectors";
 import type { JobProvider } from "./types";
-import { discoveryJobsSupportLocationColumns } from "./repository";
+import { discoveryJobsSupportLocationColumns, discoveryJobsSupportR2ContentColumns } from "./repository";
 import { discoveryLocationColumns } from "./location";
+import { storeDiscoveryJobContent } from "./content-store";
 
 const db = () => {
   if (!supabaseAdmin) throw new Error("Supabase admin client is not configured");
@@ -62,6 +63,19 @@ async function processClaimedEnrichment(queueRow: QueueRow, lockToken: string): 
       }
       const now = new Date().toISOString();
       const writeLocationColumns = await discoveryJobsSupportLocationColumns();
+      let storedContent: Awaited<ReturnType<typeof storeDiscoveryJobContent>> = null;
+      try {
+        if (!await discoveryJobsSupportR2ContentColumns()) throw new Error("R2 content schema is not applied");
+        storedContent = await storeDiscoveryJobContent({
+          jobId: job.id,
+          contentHash: hydrated.content_hash,
+          content: { description: hydrated.description, description_html: hydrated.description_html, raw_payload: hydrated.raw_payload },
+        });
+      } catch (error) {
+        // Supabase remains the durable fallback during the dual-write phase.
+        if (error instanceof Error && error.message === "R2 content schema is not applied") storedContent = null;
+        else console.error("Discovery R2 enrichment dual-write failed; retaining Supabase content:", error);
+      }
       const { error: updateError } = await database.from("discovery_jobs").update({
         ...(writeLocationColumns ? discoveryLocationColumns(hydrated.location, hydrated.workplace_type) : {}),
         title: hydrated.title,
@@ -79,6 +93,12 @@ async function processClaimedEnrichment(queueRow: QueueRow, lockToken: string): 
         source_updated_at: hydrated.source_updated_at,
         application_deadline: hydrated.application_deadline,
         raw_payload: hydrated.raw_payload,
+        ...(storedContent ? {
+          content_storage: storedContent.storage,
+          content_ref: storedContent.ref,
+          content_bytes: storedContent.bytes,
+          content_stored_at: storedContent.storedAt,
+        } : {}),
         parsed_requirements: hydrated.parsed_requirements,
         parser_version: hydrated.parser_version,
         content_hash: hydrated.content_hash,

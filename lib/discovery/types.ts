@@ -59,6 +59,10 @@ export interface DiscoveryJob {
   parsed_requirements: ParsedRequirement[];
   parser_version: string;
   content_hash: string;
+  content_storage?: "supabase" | "r2";
+  content_ref?: string | null;
+  content_stored_at?: string | null;
+  content_bytes?: number | null;
   job_sources?: {
     provider: JobProvider;
     company_name: string;

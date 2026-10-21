@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"AppliHero Preparation — local milestone","version":"0.1.0","permissions":["activeTab","scripting","storage","sidePanel"],"host_permissions":["http://localhost:3000/*"],"background":{"service_worker":"worker.js"},"side_panel":{"default_path":"panel.html"},"action":{"default_title":"Prepare this application"}}

@@ -31,3 +31,7 @@ tsconfig.tsbuildinfo
 
 # Supabase CLI scratch state
 supabase/.temp
+
+# Private offline preparation state
+.preparation-local/
+extension/dist/

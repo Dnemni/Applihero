@@ -24,7 +24,12 @@
     "audit:discovery-operations": "tsx scripts/audit-discovery-operations.ts",
     "audit:discovery-capacity": "tsx scripts/audit-discovery-capacity.ts",
     "check:discovery-r2": "tsx scripts/check-discovery-r2.ts",
-    "backfill:discovery-r2-content": "tsx scripts/backfill-discovery-r2-content.ts"
+    "backfill:discovery-r2-content": "tsx scripts/backfill-discovery-r2-content.ts",
+    "build:extension": "node scripts/preparation/build.mjs",
+    "test:preparation": "node --import tsx --test lib/preparation/*.test.ts",
+    "test:preparation-browser": "node --import tsx scripts/preparation/browser-test.ts",
+    "dev:preparation": "node scripts/preparation/dev.mjs",
+    "test:preparation-workspace": "node --import tsx scripts/preparation/workspace-test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",
@@ -46,7 +51,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
-    "react-pdf": "^10.2.0"
+    "react-pdf": "^10.2.0",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",
@@ -63,6 +69,7 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "esbuild": "^0.27.0"
   }
 }

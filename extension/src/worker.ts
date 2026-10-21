@@ -3,7 +3,11 @@ import { safePageUrl } from '../../lib/preparation/semantics';
 import type { Plan } from '../../lib/preparation/contracts';
 declare const chrome: any;
 const secureStorage = Promise.all([chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }), chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })]);
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+// Handle the toolbar gesture explicitly so Chrome grants activeTab before capture.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+chrome.action.onClicked.addListener((tab: any) => {
+    if (tab.id) chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+});
 const checkpointKey = (id: number) => `tab:${id}`;
 async function api(body?: unknown, id?: string) {
     const { token } = await chrome.storage.session.get('token');
@@ -16,6 +20,7 @@ async function api(body?: unknown, id?: string) {
     return data;
 }
 async function captureTab(tab: any) {
+    if (!tab.url) throw Error("Click the AppliHero toolbar icon on this form to grant current-tab access, then capture again.");
     const url = safePageUrl(tab.url);
     if (url.startsWith('http://localhost:3000/') && !url.includes('/preparation-fixtures/'))
         throw Error('Open an application form, not the answer workspace.');

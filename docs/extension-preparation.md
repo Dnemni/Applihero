@@ -37,6 +37,9 @@ Use fictional data for compatibility testing. On the first fixture, approve a na
 
 ## Evidence and limitations
 
+- v0.2.1 live Chrome demonstration (2026-10-21): captured 17 controls on Patreon's Ashby Software Engineering Intern application; prepared and approved five fictional contact/link answers in the local workspace; the loaded extension filled and verified all five, with values independently visible in the employer form. No upload or submission occurred. This is **5/5 attempted text/contact fields**, not complete form coverage. Ashby radio-group labels appeared as IDs, location remained manual, and custom yes/no controls appeared as inactive underlying checkboxes. Required-question totals therefore undercount this form and must not be treated as a readiness measure.
+- On real HTTPS forms, click the AppliHero toolbar icon on that tab before Capture. v0.2.1 opens the panel from the explicit toolbar action so current-tab access is granted; merely reopening a panel is insufficient. Permissions were not expanded.
+
 - `npm run test:preparation`: 12 tests at the v0.2 checkpoint, covering revisions, immutable answers, exact-context reuse, sensitive-field non-inference, sanitized identity, separate applications and concurrent store operations.
 - `npm run test:preparation-browser`: **16/16 attempted supported non-upload fills verified**, across three fixtures. Two share basic markup; the advanced fixture is independent. Tests cover preserved values, replaced DOM nodes, changed questions, ambiguous fields, radio options, dates, numbers, checkboxes, open shadow roots and exclusion of login/payment/SSN fields. This is fixture evidence, not an arbitrary-site success rate.
 - `PREPARATION_DEMO_TOKEN=<running-server-key> npm run test:preparation-workspace`: actual Next.js UI/API draft → approval → plan → result persistence and unauthenticated rejection. Uses and resets its dedicated `workspace-test.html` application record.

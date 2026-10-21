@@ -29,7 +29,8 @@
     "test:preparation": "node --import tsx --test lib/preparation/*.test.ts",
     "test:preparation-browser": "node --import tsx scripts/preparation/browser-test.ts",
     "dev:preparation": "node scripts/preparation/dev.mjs",
-    "test:preparation-workspace": "node --import tsx scripts/preparation/workspace-test.ts"
+    "test:preparation-workspace": "node --import tsx scripts/preparation/workspace-test.ts",
+    "test:preparation-extension": "node scripts/preparation/extension-test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",

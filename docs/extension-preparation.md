@@ -1,66 +1,78 @@
-# Application preparation: local milestone
+# Application preparation · local development v0.2
 
-Branch: `extension_build`. This is an isolated, single-user **fixture demo**, not the completed production MVP. Supabase downtime does not prevent this demo. Production authentication is never bypassed, production tables are never copied locally, and demo mode refuses production execution. Nothing is automatically submitted or marked submitted.
+Branch `extension_build`. Chrome MV3 extension + Next.js question workspace. The workspace runs without Supabase, using an explicitly enabled, loopback-only, single-user local store. It is not production Supabase authentication, multi-user storage or a release-ready ATS automation service.
 
-## Discoveries
+## What works
 
-- Next.js 14 / React 18 / TypeScript; Supabase bearer-token authentication in `lib/discovery/auth.ts`.
-- Existing `jobs` are private applications, not the public discovery catalog. Existing IBM/Roblox/Notion history is untouched.
-- Existing form snapshots import publicly exposed Greenhouse fields. Those are not equivalent to a captured authenticated questionnaire.
-- OpenAI is configured in `lib/supabase/client.ts`; existing question feedback uses RAG. `lib/rag/chat.ts` itself is a placeholder. Existing feedback accepts client-supplied user IDs, so it is not reused as an authorization boundary.
-- Existing background infrastructure is the discovery ingestion queue plus GitHub and Supabase schedules. This feature does not enqueue discovery or coaching work. Existing ingestion schedules are unchanged; this demo does not resolve their egress consumption.
-- No repository AGENTS.md was found. Tests use Node test/tsx; Playwright is already available.
-- `applihero_summer_2027_roles.json` and `ingestion_contract_20261009` are absent. No importer or speculative import is included. Stable IDs and historical observations remain untouched.
+- Capture a user-opened HTTPS form through the extension toolbar and side panel. No default all-sites host permission; `activeTab` grants access after the user's gesture. Executable code is packaged locally.
+- Capture labels, help text, requiredness, constraints, options, repeated fieldsets, native radio groups and inputs in open shadow roots. Password/authentication/payment/SSN-like controls are excluded. Custom widgets, uploads and inaccessible embedded frames have manual fallbacks.
+- Separate application workspaces by sanitized origin/path/requisition query. `gh_jid`, `jobId`, `job_id`, `requisitionId`, `reqId` and `jid` are retained; arbitrary queries, fragments, credentials and tokens are not stored. The user must verify the page is the intended employer/requisition. Unknown query-only identities and path-changing multi-step applications need additional identity support; do not use this build when two applications share the same sanitized URL.
+- After initial Capture, a debounced observer detects question/option/visibility changes and syncs the current page. The workspace refreshes every four seconds while visible. Unchanged exact questions keep approvals; changed questions need fresh drafts and approval. Full sanitized inventories are currently sent, not minimal network deltas.
+- A local contact profile supports exact-label suggestions. The user confirms the profile and approves each answer separately. No inference of citizenship, sponsorship, work authorization or demographic answers. Existing remote Supabase profile data is not silently copied or assumed available.
+- Draft → approve → preview → fill. Edits create answer versions, schema/answer revisions invalidate stale plans, and fill plans expire after two minutes. The worker retrieves fresh approved answers; content scripts receive only the current plan's approved fields.
+- Existing values remain unchanged. Native inputs use setters and events, radio/checkbox controls use their native click, and readback occurs after rerender. Duplicate locators, changed fields, invalid dates/numbers, missing options and employer validation stop that field.
+- Styled question inbox, application selector, local profile editor, required/manual filters, plain-language preview and field results. Styling is shared with the panel.
 
-## Install and demonstrate
+The workflow automates capture, ongoing question synchronization, answer retrieval and supported fills. Users still write/approve answers and explicitly preview/fill. It never logs in, navigates Next, uploads a file or submits an application for them. Filling may trigger the employer's autosave.
 
-1. Install dependencies with the repository's normal `npm ci`, then run `npm run build:extension`.
-2. Open Chrome's extensions page, enable Developer mode, Load unpacked, and select `extension/dist`. Copy its extension ID.
-3. Run `PREPARATION_EXTENSION_ID=<id> npm run dev:preparation`. The server binds to loopback. Copy the generated development key. Never use a Supabase token here.
-4. Open `http://localhost:3000/preparation-fixtures/generic.html`. Click the extension toolbar icon to open its panel. Connect using the development key, then Capture.
-5. Open `http://localhost:3000/prepare`, connect with the same key and refresh. Select Coach outline for the project question. Write a truthful response, Save new draft, then Approve exact answer. Repeat for desired fields. Options require the displayed underlying value (for example `US`), not a guessed mapping.
-6. Return to the fixture tab. Preview approved answers, review the values, then Fill previewed answers. Inspect structured results. Existing email is preserved; resume upload and custom dropdown remain manual. This may trigger employer autosave on future real-site versions.
-7. Click Next yourself, recapture, and refresh the workspace. The newly actionable sponsorship field requires explicit review. Every schema change currently invalidates all approvals; partial delta reuse is a later gate.
-8. Disconnect clears extension credentials and checkpoints. Local workspace data persists in ignored `.preparation-local/workspace.json` with restrictive file permissions. Stop the server and remove `.preparation-local` to delete demo captures and answers. Demo keys are stored in extension session storage, restricted to trusted extension contexts; browser restart requires reconnecting.
+## Install / update
 
-The key is an explicit development credential, **not production account pairing**. Do not use real candidate data. The extension refuses non-fixture URLs. It requests only activeTab, scripting, storage, sidePanel and the local backend origin. No remotely executable code, debugger permission, page messaging credential bridge, or final-submit action exists.
+1. From the project directory run `npm ci` if dependencies are not installed, then `npm run build:extension`.
+2. In Chrome open `chrome://extensions`. Enable Developer mode and Load unpacked → `/Users/dhruv/Documents/GitHub/Applihero/extension/dist`. If already installed, click Reload on its card after rebuilding. Version is **0.2.0**.
+3. Start the server: `PREPARATION_EXTENSION_ID=<your-extension-id> npm run dev:preparation`. For the installation observed in this task the ID was `pgacdollijjmlfeokdbgfgiccejdpgll`. Keep the terminal running. It prints a development key; never use a Supabase/service-role key here.
+4. Open a form in Chrome, click the AppliHero toolbar icon and connect the panel with the development key. Choose **Capture this form**. Capture is a deliberate transfer of sanitized question metadata to your local workspace; existing field values are not sent.
+5. Choose **Open answer workspace**. Connect using the same key. Check the application selector and page identity. Add confirmed contact details under **Your reusable details** if desired. A suggestion needs **Use suggestion**, **Save new draft**, then **Approve exact answer**.
+6. For other questions, enter answers directly and approve. Selects/radios display the employer's exact labels and preserve the underlying values. **Coach outline** is deterministic writing guidance, not an AI-generated answer.
+7. Return to the original form tab. Choose **Preview approved answers**, review the actual values, then **Fill previewed answers**. The panel explains skipped values and manual actions. No overwrite option is implemented.
+8. When conditional questions appear on the same page, their metadata syncs automatically after approximately 700ms. Review them in the workspace. If the page navigates, reopen the panel and capture again. Do not assume unseen steps have been covered.
+9. Disconnect clears extension tokens, previews and tab checkpoints. Browser restart requires reconnecting. Close/reopen panel retains the session. Local answers persist on disk.
 
-## Verified locally
+## Demo
 
-- `npm run test:preparation`: six state-machine tests covering replay, revisions, answer versioning, limits, context changes and result scope/idempotency.
-- `npm run build:extension`: unpacked extension artifact.
-- `npm run test:preparation-browser`: isolated headless Chrome. **10 / 10 attempted supported non-upload fills verified** across two fixture URLs. They use equivalent generic markup; the second is Greenhouse-style, not an independent Greenhouse adapter test. Existing values, DOM replacement, conditional visibility, manual controls and ambiguous locators are checked separately.
-- `PREPARATION_DEMO_TOKEN=<running-server-key> npm run test:preparation-workspace`: real Next.js API/UI capture → offline coach outline → draft → approval → plan → result persistence, plus unauthenticated rejection. **Resets local demo data.**
+- `http://localhost:3000/preparation-fixtures/generic.html`: basic text, email preservation, native select, repeated employers, manual upload/custom picker, conditional sponsorship question.
+- `http://localhost:3000/preparation-fixtures/advanced.html`: native radios, date/number constraints, checkbox, open shadow-root portfolio, conditional essay, excluded security controls and an embedded-frame warning.
+- `http://localhost:3000/prepare`: local question inbox.
+
+Use fictional data for compatibility testing. On the first fixture, approve a name, a short project response, and a different email. Filling must verify the name/response while keeping `existing@example.test`. On the advanced fixture, test the radio group and then reveal the next question; unchanged approvals should remain valid. A real employer form may still need manual correction.
+
+## Evidence and limitations
+
+- `npm run test:preparation`: 12 tests at the v0.2 checkpoint, covering revisions, immutable answers, exact-context reuse, sensitive-field non-inference, sanitized identity, separate applications and concurrent store operations.
+- `npm run test:preparation-browser`: **16/16 attempted supported non-upload fills verified**, across three fixtures. Two share basic markup; the advanced fixture is independent. Tests cover preserved values, replaced DOM nodes, changed questions, ambiguous fields, radio options, dates, numbers, checkboxes, open shadow roots and exclusion of login/payment/SSN fields. This is fixture evidence, not an arbitrary-site success rate.
+- `PREPARATION_DEMO_TOKEN=<running-server-key> npm run test:preparation-workspace`: actual Next.js UI/API draft → approval → plan → result persistence and unauthenticated rejection. Uses and resets its dedicated `workspace-test.html` application record.
+- `PREPARATION_DEMO_TOKEN=<key> npm run test:preparation-extension`: loaded extension integration in an isolated Chromium profile. Requires a Playwright Chromium build that supports extension loading; optionally set `PREPARATION_TEST_CHROMIUM` to its executable path. Use the same extension directory/ID configured on the server.
 - `npx tsc --noEmit --incremental false`: type checking.
+- v0.1 was demonstrated as a loaded extension in the user's Chrome: capture, panel close/reopen, name/project fill verified and existing email preserved. v0.2 also passed an isolated loaded-MV3 integration test: actual worker/content messaging, mutation auto-sync, unchanged approval retention, verified fill, panel reopen, cross-tab rejection and sign-out rejection. This is not a real employer submission test.
 
-Browser tests use isolated Chrome profiles. Content-script tests mock only the extension message bridge. The unpacked side panel/service-worker lifecycle has not yet been exercised as a loaded Chrome extension. No claim of two-user isolation, real ATS reliability, AI coaching quality, correction-time performance, or release readiness follows from these tests.
+| Controls / surface | Current handling |
+| --- | --- |
+| Native text, textarea, email, phone, URL | Fill and readback, preserving nonempty values |
+| Native select, radio group, checkbox | Exact option/value only; never inferred |
+| Date and number | Format/range checks plus native validity |
+| Repeated fieldsets | Section context and repeated legend occurrence; reordering requires recapture |
+| Open shadow roots | Capture and fill; ambiguous hosts remain unsupported |
+| Custom combobox, multiselect, rich text | Inventory/manual fallback |
+| Upload | Manual employer upload; no document-management integration |
+| Iframes | Explicit warning; open frame separately or enter manually |
+| Closed shadow roots / unseen steps | Not inspectable; coverage warning, never called complete |
+| Greenhouse, Lever, Ashby, Workday | Generic HTML only where it fits; no certified platform-specific adapters |
 
-## Capability matrix
+## Privacy, storage and operational boundaries
 
-| Surface | Capture | Fill | Limits |
-| --- | --- | --- | --- |
-| Local generic fixture | Native labels, help, requiredness, options, repeated fieldsets, visibility | text, textarea, email, tel, URL, number, date, native select, checkbox | Unique ID/name+section required; existing values preserved |
-| Greenhouse-style fixture | Same generic engine | Same engine | Equivalent markup; not a dedicated ATS adapter |
-| Radio and ARIA custom widgets | Explicit unsupported inventory | Manual | No semantic option guessing |
-| Upload | Inventory | Manual | No file assignment or document download integration |
-| Hidden/disabled controls | Not actionable | No | Recapture after visibility changes |
-| Password/auth/payment/SSN-like controls | Excluded by local conservative filter | No | Real-site exclusion audit pending |
-| Frames / shadow DOM | Not traversed | No | Inventory of unsupported frame/shadow boundaries pending |
-| Real Greenhouse, Lever, Ashby, Workday | Disabled | Disabled | Separate adapter and permission/auth gates |
+The server binds to loopback and rejects production mode, wrong Host, wrong Origin and missing/incorrect development keys. The extension only contacts the local API. Session tokens are restricted to trusted extension contexts. Checkpoints contain page identity/revision, not answers. The panel renders employer text with `textContent`; the workspace uses React escaping. No remotely supplied code is evaluated.
 
-## Supabase migration and rollback
+Local data lives in ignored `.preparation-local/workspace.json` with restrictive file permissions. This is a single-process store, not encrypted storage or tenant isolation. Stop the server and remove that directory to delete local data (back it up first if needed). There is no automatic upload to Supabase and no account-scoped deletion UI yet. Do not expose the server through a public tunnel. Metadata itself can be sensitive; inspect the captured questions before relying on the tool on a real site.
 
-`supabase/migrations/20261021000000_preparation_foundation.sql` is an **unapplied, unused foundation**, not a production persistence implementation. It adds private capture, answer-version, binding, plan and field-result tables referencing the existing private jobs. Composite ownership foreign keys and per-user policies are included. Approved answer content is protected from mutation. Public job records are not modified.
+The original user-requested ingestion JSON and contract were not found. No import, duplicate application submission, public job mutation or change to existing IBM/Roblox/Notion history occurs. Existing discovery queues and egress consumption are unchanged.
 
-Before use: run against local Supabase/Postgres; test authenticated users A/B, forged foreign keys, deletes and expired sessions; implement transactional compare-and-swap API persistence, immutable plan bindings and scoped pairing. The offline file store is single-process only and is never a production fallback. No automatic replay of offline data into production is implemented.
+## Supabase migration
 
-Rollback, only before production writes or after backing up private data: drop `preparation_field_results`, `preparation_fill_plans`, `preparation_bindings`, `preparation_answer_versions`, `preparation_captures` in that order; drop function `preparation_protect_approved_answer()`; drop index `jobs_id_user_id_preparation`. Existing jobs and application statuses remain intact. Applying the migration does not enable the feature.
+`supabase/migrations/20261021000000_preparation_foundation.sql` remains **unapplied and unused**. It adds private captures, answer versions, bindings, plans and field results, with ownership foreign keys and RLS. It does not implement a production API, pairing or all requested normalized entities. Before use, run real Postgres two-user tests and implement transactional compare-and-swap persistence and revocable device pairing.
 
-## Completion gates
+Rollback before production writes, or after backing up private data: drop `preparation_field_results`, `preparation_fill_plans`, `preparation_bindings`, `preparation_answer_versions`, `preparation_captures`, then function `preparation_protect_approved_answer()` and index `jobs_id_user_id_preparation`. Existing jobs/statuses are unaffected.
 
-1. **Local slice:** core offline flow tested. Still needed: loaded-extension integration test, recovery and multi-tab test, readable per-field panel UI, deletion action, actual server coach drafts using verified evidence. Current coaching is deterministic guidance, not AI drafting.
-2. **Production foundation:** complete normalized profile facts/definitions/events/documents, tenant isolation tests, transactional storage, short-lived device pairing/revocation, throttling, shared request validation at extension boundaries, actual job identity confirmation. Supply source JSON and ingestion contract before implementing validate → dry-run → audited transactional import and double-import tests.
-3. **Reuse and dynamic steps:** exact contextual answer reuse, sensitive-question review, per-field schema delta sync, mutation observation, batch inbox, manual upload/download and STAR stories, undo, validation feedback and current-step coverage. Current implementation conservatively invalidates all answers on any schema change.
-4. **Real-site release:** adapter interface and representative independent Greenhouse/Lever/Ashby fixtures; explicit unsupported frames/shadow roots; real MV3 restart and expiration tests; security/dependency audit; first ten consented application audits. Workday remains separate. Measure correction time, unresolved counts, coverage, reuse and coaching cost before expansion. No store publication.
+## Remaining completion gates
 
-Do not merge this milestone to main as a completed application-preparation feature. The production and real-site acceptance gates remain open.
+1. Local general-form gate: visual check of updated extension in the user’s Chrome, full service-worker crash/restart testing, more independent fixtures, backend retries with durable result checkpoints, undo, question-level deletion, better identity confirmation and path-changing step association. Current sync errors can require recapture; result logging conflicts are surfaced, never reported as saved.
+2. Production gate: Supabase transactional repository, normalized facts/definitions/documents/events, two-user isolation, rate limits, device pairing/revocation and import contract/double-import tests. Integrate existing server coaching using verified evidence and draft-only structured outputs.
+3. Real-site gate: representative ATS-specific adapters and consented first-ten-application audit. Measure verified fills, correction time, unresolved questions and reuse before rollout. Never promise every form works. No store publication or merge to main until these gates are met.

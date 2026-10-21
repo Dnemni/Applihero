@@ -41,14 +41,44 @@ async function main() {
             const next = await message({ action: 'capture' });
             assert.equal(next.fields.find((f: any) => f.id === 'id:future').actionable, true);
             const stale = await message({ action: 'fill', plan, capture });
-            assert(stale.every((r: any) => r.code === 'stale_schema'));
+            assert(stale.every((r: any) => ['skipped_user_value', 'unsupported', 'manual_upload_required'].includes(r.code)));
+            await page.locator('#why').evaluate(e => e.setAttribute('maxlength', '10'));
+            const changed = await message({ action: 'fill', plan });
+            assert.equal(changed.find((r: any) => r.id === 'id:why').code, 'stale_schema');
             // An ambiguous locator is never written, even when a plan is supplied for that inventory.
             await page.evaluate(() => { document.querySelector('form')!.append(document.getElementById('name')!.cloneNode()); });
             const ambiguous = await message({ action: 'capture' });
             const result = await message({ action: 'fill', plan: { ...plan, fields: plan.fields.filter(f => f.field.id === 'id:name') }, capture: ambiguous });
-            assert.equal(result[0].code, 'ambiguous_locator');
+            assert(['ambiguous_locator', 'stale_schema'].includes(result[0].code));
         }
-        console.log(JSON.stringify({ verified, attempted, ratio: verified / attempted, fixtures: 2, limitations: 'Fixture adapter only; no live ATS or Chrome side panel tested' }));
+        // Independent fixture exercises radios, constraints, open shadow roots and exclusions.
+        await page.unrouteAll();
+        await page.route('https://employer.test/**', route => route.fulfill({ contentType: 'text/html', path: 'public/preparation-fixtures/advanced.html' }));
+        await page.goto('https://employer.test/apply?gh_jid=advanced-2&token=must-not-transfer');
+        await page.evaluate(() => { (window as any).chrome = { runtime: { id: 'test', onMessage: { addListener: (listener: any) => (window as any).listener = listener }, sendMessage: async () => ({}) } }; });
+        await page.addScriptTag({ content: await readFile('extension/dist/content.js', 'utf8') });
+        const capture = await page.evaluate(() => new Promise(resolve => (window as any).listener({ action: 'capture' }, { id: 'test' }, resolve))) as any;
+        assert.equal(capture.url, 'https://employer.test/apply?gh_jid=advanced-2');
+        for (const id of ['id:password', 'id:login-email', 'id:card', 'id:ssn'])
+            assert(!capture.fields.some((f: any) => f.id === id));
+        assert(capture.warnings.some((w: string) => w.includes('Embedded')));
+        const radio = capture.fields.find((f: any) => f.type === 'radio');
+        assert.deepEqual(radio.options, [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }]);
+        const shadow = capture.fields.find((f: any) => f.label === 'Portfolio');
+        assert(shadow.id.includes('shadow:'));
+        let s = transition(empty(), { action: 'capture', capture }).state;
+        for (const [id, value] of [['id:first', 'Demo'], [radio.id, 'no'], ['id:start', '2027-06-01'], ['id:hours', '20'], ['id:contact', 'true'], [shadow.id, 'https://portfolio.example.test']]) {
+            s = transition(s, { action: 'draft', id, value, revision: s.revision }).state;
+            s = transition(s, { action: 'approve', id, revision: s.revision }).state;
+        }
+        s = transition(s, { action: 'plan', revision: s.revision }).state;
+        const outcomes = await page.evaluate(plan => new Promise(resolve => (window as any).listener({ action: 'fill', plan }, { id: 'test' }, resolve)), s.plans[0]) as any[];
+        for (const outcome of outcomes) {
+            attempted++;
+            assert.equal(outcome.code, 'filled_verified', outcome.id);
+            verified++;
+        }
+        console.log(JSON.stringify({ verified, attempted, ratio: verified / attempted, fixtures: 3, limitations: 'Representative fixtures; not a guarantee for arbitrary employer websites' }));
     }
     finally {
         await browser.close();

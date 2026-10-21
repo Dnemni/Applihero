@@ -78,7 +78,38 @@ async function main() {
             assert.equal(outcome.code, 'filled_verified', outcome.id);
             verified++;
         }
-        console.log(JSON.stringify({ verified, attempted, ratio: verified / attempted, fixtures: 3, limitations: 'Representative fixtures; not a guarantee for arbitrary employer websites' }));
+        await page.unrouteAll();
+        await page.route('https://employer.test/**', route => route.fulfill({ contentType: 'text/html', path: 'public/preparation-fixtures/ashby.html' }));
+        await page.goto('https://employer.test/ashby');
+        await page.evaluate(() => { (window as any).chrome = { runtime: { id: 'test', onMessage: { addListener: (fn: any) => (window as any).listener = fn }, sendMessage: async () => ({}) } }; });
+        await page.addScriptTag({ content: await readFile('extension/dist/content.js', 'utf8') });
+        const send = (m: any) => page.evaluate(m => new Promise<any>(resolve => (window as any).listener(m, { id: 'test' }, resolve)), m);
+        const ashby = await send({ action: 'capture' });
+        const sponsor = ashby.fields.find((f: any) => f.label.startsWith('Require US'));
+        const source = ashby.fields.find((f: any) => f.label === 'How did you hear about us?');
+        const location = ashby.fields.find((f: any) => f.label === 'Location');
+        assert(sponsor.required && sponsor.actionable);
+        assert(source.required);
+        assert.deepEqual(source.options.map((o: any) => o.value), ['source-a', 'source-b']);
+        let a = transition(empty(), { action: 'capture', capture: ashby }).state;
+        for (const [id, value] of [[sponsor.id, 'no'], [source.id, 'source-b'], [location.id, 'Saratoga, California, United States']]) {
+            a = transition(a, { action: 'draft', id, value, revision: a.revision }).state;
+            a = transition(a, { action: 'approve', id, revision: a.revision }).state;
+        }
+        a = transition(a, { action: 'plan', revision: a.revision }).state;
+        const filled = await send({ action: 'fill', plan: a.plans[0] });
+        assert(filled.every((r: any) => r.code === 'filled_verified'), JSON.stringify(filled));
+        verified += filled.length; attempted += filled.length;
+        const pdf = Buffer.from('%PDF-1.4\nfixture');
+        const { createHash } = await import('node:crypto');
+        const upload = { id: 'test-upload', tabId: 1, applicationId: 'test', revision: a.revision, url: ashby.url, expires: Date.now() + 120000, field: ashby.fields.find((f: any) => f.id === 'id:resume'), document: { name: 'fixture.pdf', size: pdf.length, sha256: createHash('sha256').update(pdf).digest('hex') } };
+        assert((await send({ action: 'upload', plan: {...upload, url: 'https://wrong.test'}, base64: pdf.toString('base64') })).error);
+        assert((await send({ action: 'upload', plan: upload, base64: Buffer.from('bad').toString('base64') })).error);
+        assert((await send({ action: 'upload', plan: upload, base64: pdf.toString('base64') })).message.includes('filename verified'));
+        assert.equal(await page.locator('#receipt').textContent(), 'fixture.pdf');
+        assert((await send({ action: 'upload', plan: upload, base64: pdf.toString('base64') })).error);
+        assert.equal(await page.locator('#submissions').textContent(), '0');
+        console.log(JSON.stringify({ verified, attempted, ratio: verified / attempted, fixtures: 4, limitations: 'Representative fixtures; not a guarantee for arbitrary employer websites' }));
     }
     finally {
         await browser.close();

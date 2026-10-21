@@ -1,7 +1,7 @@
 import { z } from "zod";
 export const Field = z.object({
     id: z.string().min(1).max(1000), label: z.string().max(2000), help: z.string().max(2000),
-    type: z.enum(["text", "textarea", "email", "tel", "url", "number", "date", "select", "radio", "checkbox", "file", "unsupported"]),
+    type: z.enum(["text", "textarea", "email", "tel", "url", "number", "date", "select", "combobox", "radio", "checkbox", "file", "unsupported"]),
     required: z.boolean(), actionable: z.boolean(), section: z.string().max(500),
     options: z.array(z.object({ label: z.string().max(500), value: z.string().max(500) })).max(200),
     maxLength: z.number().int().min(-1), pattern: z.string().max(500),

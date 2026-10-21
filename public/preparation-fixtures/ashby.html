@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>Ashby-style controls</title></head><body>
+<div data-field-entry-id="sponsor"><label class="ashby-application-form-question-title _required_fixture" for="sponsor">Require US sponsorship now or in future?</label><div class="ashby-application-form-input-yesno"><button type="button" data-option="yes" aria-pressed="false">Yes</button><button type="button" data-option="no" aria-pressed="false">No</button><input style="display:none" type="checkbox" name="sponsor"></div></div>
+<div data-field-entry-id="source"><fieldset><label class="ashby-application-form-question-title _required_fixture">How did you hear about us?</label><input type="radio" id="source-a" name="source"><label for="source-a">LinkedIn</label><input type="radio" id="source-b" name="source"><label for="source-b">Careers Page</label></fieldset></div>
+<div data-field-entry-id="location"><label class="ashby-application-form-question-title _required_fixture">Location</label><input class="ashby-application-form-input-autocomplete" role="combobox" aria-controls="locations" aria-expanded="false"><div id="locations" role="listbox" hidden><div role="option">Saratoga, California, United States</div></div></div>
+<label for="resume">Resume</label><input type="file" id="resume" accept=".pdf" required><p id="receipt"></p>
+<form id="final"><button type="submit">Submit Application</button></form><output id="submissions">0</output>
+<script>
+for(const b of document.querySelectorAll('[data-option]')) b.onclick=()=>{ for(const x of b.parentElement.querySelectorAll('button')) x.setAttribute('aria-pressed',String(x===b)); };
+const combo=document.querySelector('[role=combobox]');combo.oninput=()=>{document.querySelector('[role=listbox]').hidden=false;combo.setAttribute('aria-expanded','true');};document.querySelector('[role=option]').onclick=()=>{combo.value='Saratoga, California, United States';combo.setAttribute('aria-expanded','false');document.querySelector('[role=listbox]').hidden=true;};
+document.querySelector('#resume').onchange=e=>document.querySelector('#receipt').textContent=e.target.files[0].name;
+document.querySelector('#final').onsubmit=e=>{e.preventDefault();document.querySelector('#submissions').textContent='1';};
+</script></body></html>

@@ -1,6 +1,11 @@
+import { digest } from './document';
 export {};
 declare const chrome: any;
 const feedback = document.querySelector<HTMLElement>('#feedback')!, preview = document.querySelector('#preview')!, results = document.querySelector('#results')!, fill = document.querySelector<HTMLButtonElement>('[data-action="fill"]')!;
+let uploadId = '';
+const fileInput = document.querySelector<HTMLInputElement>('#resume-file')!;
+const uploadButton = document.querySelector<HTMLButtonElement>('[data-action=upload]')!;
+fileInput.addEventListener('change', () => { uploadId = ''; uploadButton.disabled = true; document.querySelector('#upload-preview')!.replaceChildren(); });
 function el(tag: string, value: string, cls = '') { const e = document.createElement(tag); e.textContent = value; e.className = cls; return e; }
 function workspace(id?: string) { if (id)
     (document.querySelector('#workspace') as HTMLAnchorElement).href = `http://localhost:3000/prepare?application=${encodeURIComponent(id)}`; }
@@ -12,11 +17,29 @@ for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('bu
         feedback.textContent = 'Working…';
         button.disabled = true;
         try {
-            const response = await chrome.runtime.sendMessage({ action, ...(action === 'connect' ? { token: (document.querySelector('#key') as HTMLInputElement).value } : {}) });
+            let extra: Record<string, unknown> = {};
+            if (action === 'upload_preview' || action === 'upload') {
+                const file = fileInput.files?.[0];
+                if (!file || file.size > 5 * 1024 * 1024) throw Error('Choose a PDF up to 5 MB.');
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                if (action === 'upload_preview') extra = { document: { name: file.name, size: file.size, sha256: await digest(bytes) } };
+                else {
+                    let binary = ''; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.slice(i, i + 8192));
+                    extra = { planId: uploadId, base64: btoa(binary) };
+                }
+            }
+            const response = await chrome.runtime.sendMessage({ action, ...extra, ...(action === 'connect' ? { token: (document.querySelector('#key') as HTMLInputElement).value } : {}) });
             if (response?.error)
                 throw Error(response.error);
             const data = response.data;
             workspace(data.applicationId);
+            if (action === 'upload_preview') {
+                uploadId = data.uploadPlan.id;
+                document.querySelector('#upload-preview')!.textContent = `${data.uploadPlan.document.name} → ${data.uploadPlan.url} · ${data.uploadPlan.field.label}. Expires in two minutes.`;
+                uploadButton.disabled = false;
+            }
+            if (action === 'upload') { fileInput.value = ''; uploadId = ''; uploadButton.disabled = true; }
+
             feedback.textContent = data.message || 'Done.';
             if (action === 'connect') {
                 (document.querySelector('#key') as HTMLInputElement).value = '';
@@ -33,18 +56,19 @@ for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('bu
                 preview.replaceChildren();
                 for (const item of data.plan.fields) {
                     const row = el('div', '', 'row');
-                    row.append(el('strong', item.field.label), el('p', item.answer.value, 'value'));
+                    const choice = item.field.options.find((option: { value: string; label: string }) => option.value === item.answer.value);
+                    row.append(el('strong', item.field.label), el('p', choice?.label || item.answer.value, 'value'));
                     preview.append(row);
                 }
                 fill.disabled = !data.plan.fields.length;
-                feedback.textContent = `${data.plan.fields.length} approved answers ready. ${data.unresolved} actionable required questions still need review.`;
+                feedback.textContent = `${data.plan.fields.length} approved answers ready. ${data.unresolved} captured required controls still need answers or manual action. Coverage may be incomplete.`;
             }
             if (action === 'fill') {
                 fill.disabled = true;
                 results.replaceChildren(el('h2', 'Fill results'));
                 for (const r of data.results) {
                     const row = el('div', '', 'card');
-                    row.append(el('strong', r.id), el('p', labels[r.code] || r.code));
+                    row.append(el('strong', data.fieldLabels?.[r.id] || r.id), el('p', labels[r.code] || r.code));
                     results.append(row);
                 }
                 feedback.textContent = data.message || 'Finished checking the form. Review the results below.';
@@ -62,7 +86,7 @@ for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('bu
             fill.disabled = true;
         }
         finally {
-            if (action !== 'fill')
+            if (action !== 'fill' && action !== 'upload')
                 button.disabled = false;
         }
     });

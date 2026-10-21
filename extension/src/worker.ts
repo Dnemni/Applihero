@@ -1,3 +1,4 @@
+import { DocumentMetadata, UploadPlan, decodeDocument } from './document';
 import { Capture, Result } from '../../lib/preparation/contracts';
 import { safePageUrl } from '../../lib/preparation/semantics';
 import type { Plan } from '../../lib/preparation/contracts';
@@ -41,7 +42,7 @@ chrome.runtime.onMessage.addListener((m: any, sender: any, reply: any) => {
             return; await sync(sender.tab); })().catch(() => { });
         return;
     }
-    if (sender.url !== chrome.runtime.getURL('panel.html') || !['connect', 'capture', 'preview', 'fill', 'signout', 'status'].includes(m.action))
+    if (sender.url !== chrome.runtime.getURL('panel.html') || !['connect', 'capture', 'preview', 'fill', 'signout', 'status', 'upload_preview', 'upload'].includes(m.action))
         return;
     (async () => {
         await secureStorage;
@@ -74,11 +75,33 @@ chrome.runtime.onMessage.addListener((m: any, sender: any, reply: any) => {
             return sync(tab);
         if (!saved || safePageUrl(tab.url) !== saved.url)
             throw Error('Capture this form before previewing answers.');
+        if (m.action === 'upload_preview') {
+            const metadata = DocumentMetadata.parse(m.document);
+            const state = await sync(tab);
+            const candidates = state.capture.fields.filter((f: any) => f.type === 'file' && f.actionable && /^resume\b|^résumé\b|^cv\b/i.test(f.label));
+            if (candidates.length !== 1) throw Error('A unique labelled résumé upload was not found. Use manual upload.');
+            const plan = UploadPlan.parse({ id: crypto.randomUUID(), tabId: tab.id, applicationId: saved.applicationId, revision: state.revision, url: saved.url, expires: Date.now() + 120000, field: candidates[0], document: metadata });
+            await chrome.storage.session.set({ uploadPreview: plan });
+            return { uploadPlan: plan };
+        }
+        if (m.action === 'upload') {
+            const { uploadPreview } = await chrome.storage.session.get('uploadPreview');
+            const plan = UploadPlan.parse(uploadPreview);
+            if (plan.id !== m.planId || plan.tabId !== tab.id || plan.applicationId !== saved.applicationId || plan.url !== saved.url || plan.expires < Date.now()) throw Error('Preview this document on the current tab again.');
+            const state = await api(undefined, saved.applicationId);
+            if (state.revision !== plan.revision) throw Error('Questions or answers changed. Preview upload again.');
+            await decodeDocument(m.base64, plan.document);
+            // Consume before dispatch: never automatically retry an uncertain upload.
+            await chrome.storage.session.remove('uploadPreview');
+            const result = await chrome.tabs.sendMessage(tab.id, { action: 'upload', plan, base64: m.base64 });
+            if (result?.error) throw Error(result.error);
+            return result;
+        }
         if (m.action === 'preview') {
             const state = await sync(tab);
             const plan = await api({ action: 'plan', revision: state.revision }, saved.applicationId);
             await chrome.storage.session.set({ preview: { id: plan.id, tabId: tab.id, applicationId: saved.applicationId } });
-            return { plan, applicationId: saved.applicationId, unresolved: state.capture.fields.filter((f: any) => f.required && f.actionable && !plan.fields.some((x: any) => x.field.id === f.id)).length };
+            return { plan, applicationId: saved.applicationId, unresolved: state.capture.fields.filter((f: any) => f.required && !plan.fields.some((x: any) => x.field.id === f.id)).length };
         }
         const { preview } = await chrome.storage.session.get('preview');
         if (preview?.tabId !== tab.id || preview.applicationId !== saved.applicationId)
@@ -94,10 +117,10 @@ chrome.runtime.onMessage.addListener((m: any, sender: any, reply: any) => {
         }
         catch {
             await chrome.storage.session.remove('preview');
-            return { results, message: 'Results shown below. The page changed during filling; capture and review before continuing. Results could not be saved.' };
+            return { results, fieldLabels: Object.fromEntries(plan.fields.map(f => [f.field.id, f.field.label])), message: 'Results shown below. The page changed during filling; capture and review before continuing. Results could not be saved.' };
         }
         await chrome.storage.session.remove('preview');
-        return { results, applicationId: saved.applicationId };
+        return { results, fieldLabels: Object.fromEntries(plan.fields.map(f => [f.field.id, f.field.label])), applicationId: saved.applicationId };
     })().then(data => reply({ data })).catch(e => reply({ error: e.message }));
     return true;
 });
